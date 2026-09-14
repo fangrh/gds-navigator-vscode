@@ -1,0 +1,119 @@
+{
+  "name": "gds-navigator",
+  "displayName": "GDS Navigator",
+  "description": "Open .gds layouts directly in VS Code with provenance-aware source navigation. Ported from superGDS Studio (fangrh/overages).",
+  "version": "0.1.0",
+  "publisher": "fangrh",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "gdsNavigator.viewer",
+        "displayName": "GDS Navigator",
+        "selector": [
+          {
+            "filenamePattern": "*.gds"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "gdsNavigator.selectPythonEnv",
+        "title": "GDS: Select Python Environment"
+      },
+      {
+        "command": "gdsNavigator.runScript",
+        "title": "GDS: Run Python Script (Build GDS)"
+      },
+      {
+        "command": "gdsNavigator.rebuild",
+        "title": "GDS: Rebuild Current Layout"
+      },
+      {
+        "command": "gdsNavigator.copyYaml",
+        "title": "GDS: Copy Selection as YAML (AI-ready)"
+      },
+      {
+        "command": "gdsNavigator.associateScript",
+        "title": "GDS: Associate Python Script with Current Layout"
+      },
+      {
+        "command": "gdsNavigator.openViewer",
+        "title": "GDS: Open Current File in GDS Navigator"
+      },
+      {
+        "command": "gdsNavigator.selectBySource",
+        "title": "GDS: Select Features by Source Line"
+      },
+      {
+        "command": "gdsNavigator.insertImage",
+        "title": "GDS: Insert Microscope Image"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "gdsNavigator.rebuild",
+          "group": "navigation",
+          "when": "activeCustomEditorId == 'gdsNavigator.viewer'"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "GDS Navigator",
+      "properties": {
+        "gdsNavigator.pythonPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Python executable used to parse GDS files and run build scripts. Leave empty to use the environment picked via **GDS: Select Python Environment** (conda). The environment needs `klayout` installed; provenance generation additionally needs the [fangrh/gdsfactory](https://github.com/fangrh/gdsfactory) fork."
+        },
+        "gdsNavigator.parseTimeoutSec": {
+          "type": "number",
+          "default": 120,
+          "description": "Timeout in seconds for parsing a GDS file."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run build:webview && node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "build:webview": "node esbuild-webview.mjs",
+    "package": "npm run build:webview && node esbuild.mjs --production",
+    "test": "echo \"no tests yet\""
+  },
+  "dependencies": {
+    "ol": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.75.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fangrh/gds-navigator-vscode.git"
+  },
+  "keywords": [
+    "gds",
+    "klayout",
+    "gdsfactory",
+    "photonics",
+    "microscope",
+    "provenance"
+  ]
+}

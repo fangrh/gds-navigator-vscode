@@ -1,0 +1,17 @@
+node_modules/
+dist/
+media/ol.js
+media/ol.css
+*.vsix
+.vscode-test/
+
+# local python venv for provenance testing (create with scripts/setup-venv.ps1)
+.venv-fork/
+
+# large test fixtures (chip layouts / microscope photos) stay local:
+#   test/fixtures/*.json *.png — regenerate from your own GDS/photos
+test/fixtures/*.json
+test/fixtures/*.png
+test/fixtures/*.tif
+webview/test-standalone.html
+scripts/_viewer_check.js

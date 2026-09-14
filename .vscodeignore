@@ -1,0 +1,9 @@
+src/**
+node_modules/**
+test/**
+scripts/**
+webview/test-standalone.html
+**/*.map
+.vscode/**
+.venv-fork/**
+test_e2e.ps1

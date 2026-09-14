@@ -1,0 +1,2161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GDS Viewer</title>
+__OL_CSS__
+__OL_JS__
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; }
+#sidebar { width: 120px; background: #1e1e2e; color: #cdd6f4; overflow-y: auto; padding: 8px; flex-shrink: 0; }
+#sidebar h4 { margin: 0 0 8px 0; color: #89b4fa; font-size: 13px; }
+#sidebar button { width: 100%; margin-bottom: 8px; padding: 6px 10px; background: #45475a; color: #cdd6f4; border: 1px solid #585b70; border-radius: 4px; cursor: pointer; font-size: 12px; }
+#sidebar button:hover { background: #585b70; }
+#map-container { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.file-item { padding: 6px 8px; cursor: pointer; border-radius: 4px; margin-bottom: 2px; font-size: 13px; word-break: break-all; }
+.file-item:hover { background: #313244; }
+.file-item.active { background: #45475a; }
+.legend-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 12px; cursor: pointer; }
+.swatch { width: 14px; height: 14px; border-radius: 2px; flex-shrink: 0; }
+.swatch.hidden { opacity: 0.2; }
+.zoom-btn#copy-btn.copied { color: #a6e3a1; border-color: #a6e3a1; }
+.ol-dragbox { border: 2px dashed #89b4fa !important; background-color: rgba(137,180,250,0.1) !important; }
+#map-row { display: flex; flex: 1; min-height: 0; }
+#draw-toolbar { width: 40px; background: #1e1e2e; border-left: 1px solid #313244; display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 4px; flex-shrink: 0; }
+.tool-btn { width: 32px; height: 32px; background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #6c7086; padding: 0; }
+.tool-btn:hover { background: #313244; color: #cdd6f4; }
+.tool-btn.active { background: #45475a; color: #89b4fa; border-color: #89b4fa; }
+.tool-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#mode-indicator { padding: 4px 8px; background: #1e1e2e; color: #a6e3a1; font-size: 11px; border-radius: 4px; border: 1px solid #313244; margin-bottom: 8px; text-align: center; }
+#mode-indicator.partial { border-color: #e17055; color: #e17055; cursor: pointer; }
+#zoom-controls { position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column; gap: 2px; z-index: 100; }
+.zoom-btn { width: 32px; height: 32px; background: #1e1e2e; border: 1px solid #313244; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #6c7086; padding: 0; }
+.zoom-btn:hover { background: #313244; color: #cdd6f4; }
+.zoom-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.zoom-btn.running { opacity: 0.6; pointer-events: none; }
+.zoom-btn.running .run-icon { display: none; }
+.zoom-btn.running .spinner-icon { display: inline-block; }
+.zoom-btn .spinner-icon { display: none; width: 14px; height: 14px; border: 2px solid #6c7086; border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#rebuild-overlay { display: none; position: absolute; inset: 0; background: rgba(26,26,46,0.7); z-index: 200; align-items: center; justify-content: center; color: #89b4fa; font-size: 14px; }
+#rebuild-overlay.visible { display: flex; }
+#rebuild-overlay .spinner { width: 28px; height: 28px; border: 3px solid #313244; border-top-color: #89b4fa; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 10px; }
+</style>
+</head>
+<body>
+<div id="sidebar">
+    <div class="legend-section" id="legend"></div>
+</div>
+<div id="map-container">
+    <div id="map-row">
+        <div id="map" style="flex:1; position: relative;">
+            <div id="zoom-controls">
+                <button class="zoom-btn" id="run-btn" title="Rebuild script">
+                    <svg class="run-icon" viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21" fill="currentColor" stroke="none"/></svg>
+                    <span class="spinner-icon"></span>
+                </button>
+                <button class="zoom-btn" id="zoom-in-btn" title="Zoom in">
+                    <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <button class="zoom-btn" id="zoom-out-btn" title="Zoom out">
+                    <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                </button>
+                <button class="zoom-btn" id="fit-btn" title="Fit view">
+                    <svg viewBox="0 0 24 24"><path d="M4 4h4M4 4v4M20 4h-4M20 4v4M4 20h4M4 20v-4M20 20h-4M20 20v-4"/></svg>
+                </button>
+                <button class="zoom-btn" id="copy-btn" title="Copy selection as YAML (Ctrl+Shift+C)">
+                    <svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                </button>
+            </div>
+            <div id="rebuild-overlay">
+                <div class="spinner"></div>
+                Rebuilding...
+            </div>
+        </div>
+        <div id="draw-toolbar">
+            <button class="tool-btn active" data-mode="select" title="Select (1)">
+                <svg viewBox="0 0 24 24"><path d="M5 3l14 9-7 2-3 7z"/></svg>
+            </button>
+            <button class="tool-btn" data-mode="rectangle" title="Rectangle (2)">
+                <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>
+            </button>
+            <button class="tool-btn" data-mode="circle" title="Circle (3)">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg>
+            </button>
+            <button class="tool-btn" data-mode="line" title="Line (4)">
+                <svg viewBox="0 0 24 24"><line x1="5" y1="19" x2="19" y2="5"/></svg>
+            </button>
+            <button class="tool-btn" data-mode="polygon" title="Polygon (5)">
+                <svg viewBox="0 0 24 24"><path d="M12 3l9 7-3 10H6L3 10z"/></svg>
+            </button>
+            <div style="height:1px;width:24px;background:#313244;margin:4px 0;"></div>
+            <button class="tool-btn" data-mode="delete" title="Delete drawn">
+                <svg viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+            </button>
+            <button class="tool-btn" data-mode="snap" title="Snap (S)">
+                <svg viewBox="0 0 24 24"><path d="M6 16c0-3.3 2.7-6 6-6s6 2.7 6 6v3H6z"/><line x1="12" y1="3" x2="12" y2="7"/></svg>
+            </button>
+            <div style="height:1px;width:24px;background:#313244;margin:4px 0;"></div>
+            <button class="tool-btn" id="img-insert-btn" title="Insert microscope image">
+                <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 15l-5-5L5 19"/></svg>
+            </button>
+            <button class="tool-btn" id="img-move-btn" title="Move/scale image (drag; Shift+wheel scale; R/T rotate)">
+                <svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20M12 2l-3 3M12 2l3 3M12 22l-3-3M12 22l3-3M2 12l3-3M2 12l3 3M22 12l-3-3M22 12l-3 3"/></svg>
+            </button>
+            <button class="tool-btn" id="img-align-btn" title="Auto-align image to layout (edge features)">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ============================================================
+// VS Code Webview API
+// ============================================================
+let vscode = null; try { vscode = acquireVsCodeApi(); } catch(e) { /* standalone */ }
+// Surface any webview error to the extension log instead of dying silently.
+window.addEventListener('error', function(e) {
+    if (vscode) {
+        vscode.postMessage({ type: 'debugError', where: 'window.onerror', message: String(e.message || e) + ' @ ' + String(e.filename || '') + ':' + String(e.lineno || '') + ':' + String(e.colno || '') });
+    }
+});
+window.addEventListener('unhandledrejection', function(e) {
+    if (vscode) {
+        vscode.postMessage({ type: 'debugError', where: 'unhandledrejection', message: String((e.reason && e.reason.message) || e.reason) });
+    }
+});
+
+// ============================================================
+// State
+// ============================================================
+var repo = '';
+var branch = '';
+var currentFilePath = '';
+var currentGdsPath = '';
+var currentPythonFile = '';
+var currentMode2 = 'partial';
+var selectedFeatures = new ol.Collection();
+var ctrlPressed = false;
+// Progressive selection cycle: 0=none, 1=array, 2=loop_index
+var selectionCycle = 0;
+var allFeatures = [];
+var layerColors = {};
+
+var currentMode = 'select';
+var snapActive = false;
+var drawInteractions = {};
+
+var drawSource = new ol.source.Vector();
+
+var drawStyleDefault = new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#f38ba8', width: 2, lineDash: [8, 4] }),
+    fill: new ol.style.Fill({ color: 'rgba(243, 139, 168, 0.1)' })
+});
+
+var drawStyleSelected = new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 }),
+    fill: new ol.style.Fill({ color: 'rgba(243, 139, 168, 0.3)' })
+});
+
+var drawLayer = new ol.layer.Vector({
+    source: drawSource,
+    style: function(feature) {
+        return feature.get('selected') ? drawStyleSelected : drawStyleDefault;
+    }
+});
+
+// ============================================================
+// Keyboard handling
+// ============================================================
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Control' || e.key === 'Meta') ctrlPressed = true;
+    // Ctrl+Shift+C copies the current selection as AI-ready YAML
+    if ((e.key === 'C' || e.key === 'c') && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+        e.preventDefault();
+        copyYAML(e);
+        return;
+    }
+    if (e.key === 'Escape') {
+        if (currentMode !== 'select') {
+            setMode('select');
+        }
+        clearSelection();
+        onSelectionChanged();
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedFeatures.getArray().some(function(f) { return f.get('isDrawn'); })) {
+            e.preventDefault();
+            deleteDrawn();
+        }
+    }
+    if (e.key === '1') setMode('select');
+    if (e.key === '2') setMode('rectangle');
+    if (e.key === '3') setMode('circle');
+    if (e.key === '4') setMode('line');
+    if (e.key === '5') setMode('polygon');
+    if ((e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey) toggleSnap();
+    if ((e.key === 'a' || e.key === 'A') && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        handleCtrlA();
+    }
+    // Microscope image adjustments (only while the image-move tool is on)
+    if (imgMoveMode && microImg) {
+        var stepUm = e.shiftKey ? 10 : 1;
+        if (e.key === 'ArrowLeft') { e.preventDefault(); nudgeMicroImage(-stepUm, 0); }
+        if (e.key === 'ArrowRight') { e.preventDefault(); nudgeMicroImage(stepUm, 0); }
+        if (e.key === 'ArrowUp') { e.preventDefault(); nudgeMicroImage(0, stepUm); }
+        if (e.key === 'ArrowDown') { e.preventDefault(); nudgeMicroImage(0, -stepUm); }
+        if (e.key === 'r' || e.key === 'R') rotateMicroImage(e.shiftKey ? -1 : 1);
+        if (e.key === 't' || e.key === 'T') rotateMicroImage(e.shiftKey ? -5 : 5);
+        if (e.key === 'o' || e.key === 'O') {
+            microImg.opacity = Math.max(0.1, Math.round((microImg.opacity - 0.1) * 10) / 10);
+            renderMicroLayer();
+        }
+        if (e.key === 'p' || e.key === 'P') {
+            microImg.opacity = Math.min(1.0, Math.round((microImg.opacity + 0.1) * 10) / 10);
+            renderMicroLayer();
+        }
+    }
+});
+document.addEventListener('keyup', function(e) {
+    if (e.key === 'Control' || e.key === 'Meta') ctrlPressed = false;
+});
+
+// ============================================================
+// Selection management
+// ============================================================
+function addToSelection(features) {
+    features.forEach(function(f) {
+        if (!selectedFeatures.getArray().includes(f)) {
+            selectedFeatures.push(f);
+            f.set('selected', true);
+        }
+    });
+}
+
+function removeFromSelection(features) {
+    features.forEach(function(f) {
+        selectedFeatures.remove(f);
+        f.set('selected', false);
+    });
+}
+
+function replaceSelection(features) {
+    selectedFeatures.forEach(function(f) { f.set('selected', false); });
+    selectedFeatures.clear();
+    features.forEach(function(f) {
+        selectedFeatures.push(f);
+        f.set('selected', true);
+    });
+    vectorLayer.changed();
+    drawLayer.changed();
+}
+
+function clearSelection() {
+    selectedFeatures.forEach(function(f) { f.set('selected', false); });
+    selectedFeatures.clear();
+    vectorLayer.changed();
+    drawLayer.changed();
+    onSelectionChanged();
+}
+
+// Progressive Ctrl+A selection:
+//   0 → 1: select all elements of the same placement (instance_name + file + line)
+//           If no instance_name, skip to L2.
+//   1 → 2: expand to same for-loop iteration (file + placement_line + loop_index)
+//   2 → 0: clear selection
+// Python-style zero-based tuple: [3,2] -> "(3,2)"; [[0,1],[2,0]] -> "(0,1)x(2,0)".
+function _fmtIdx(v) {
+    if (!Array.isArray(v) || !v.length) return '';
+    if (Array.isArray(v[0])) return v.map(function (lv) { return '(' + lv.join(',') + ')'; }).join('x');
+    return '(' + v.join(',') + ')';
+}
+
+// Index vector of a feature: loop_index followed by (flattened) array_index,
+// outermost-first. e.g. nested for + array placement -> [i, j, col, row].
+function _idxVec(prov) {
+    var vec = [];
+    var li = prov.loop_index;
+    if (Array.isArray(li)) {
+        for (var i = 0; i < li.length; i++) vec.push(Number(li[i]));
+    }
+    var ai = prov.array_index;
+    if (Array.isArray(ai)) {
+        if (ai.length && Array.isArray(ai[0])) {
+            ai.forEach(function (lv) { for (var q = 0; q < lv.length; q++) vec.push(Number(lv[q])); });
+        } else {
+            for (var q2 = 0; q2 < ai.length; q2++) vec.push(Number(ai[q2]));
+        }
+    }
+    return vec;
+}
+
+function _vecPrefixEq(a, b, k) {
+    if (k > a.length || k > b.length) return false;
+    for (var i = 0; i < k; i++) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+}
+
+function _levelLabel(aVec, k) {
+    if (aVec.length === 0) return k <= 0 ? 'same instance' : 'whole placement line';
+    if (k >= aVec.length) return 'element (' + aVec.join(',') + ')';
+    if (k <= 0) return 'whole placement line';
+    return 'same (' + aVec.slice(0, k).join(',') + '), inner free';
+}
+
+function handleCtrlA() {
+    var features = selectedFeatures.getArray();
+    if (features.length === 0) return;
+    var anchor = features[0];
+    var aProv = anchor.get('provenance') || {};
+    var aFile = (aProv.file || '').replace(/\\/g, '/');
+    var aLine = aProv.line;
+    var aInst = aProv.instance_name || '';
+    var aVec = _idxVec(aProv);
+
+    function sameLine(f) {
+        var p = f.get('provenance') || {};
+        return (p.file || '').replace(/\\/g, '/') === aFile && p.line === aLine;
+    }
+    var lineGroup = allFeatures.filter(sameLine);
+
+    // Ladder of selection levels, innermost first:
+    //   L1: same instance + full index vector (one loop iteration / one array
+    //       element / one plain instance)
+    //   L2..Ln: same placement line + index prefix (drop the innermost index
+    //       each press — walk outward through nested loops / arrays)
+    //   then: clear
+    var levels = [];
+    levels.push(function (f) {
+        var p = f.get('provenance') || {};
+        return p.instance_name === aInst && _vecPrefixEq(_idxVec(p), aVec, aVec.length);
+    });
+    for (var k = aVec.length - 1; k >= 0; k--) {
+        (function (kk) {
+            levels.push(function (f) {
+                return _vecPrefixEq(_idxVec(f.get('provenance') || {}), aVec, kk);
+            });
+        })(k);
+    }
+    // Plain features (no loop/array indices): still offer a "whole placement
+    // line" step after the instance level.
+    if (aVec.length === 0) {
+        levels.push(function (f) { return true; }); // within lineGroup
+    }
+
+    // Advance the cycle, skipping levels that wouldn't expand the selection.
+    var level = selectionCycle; // 0-based next level index
+    var matches = null;
+    while (level < levels.length) {
+        var cand = lineGroup.filter(levels[level]);
+        if (cand.length > features.length) { matches = cand; break; }
+        level++;
+    }
+    var cycleEl = document.getElementById('cycle-indicator');
+    if (matches === null) {
+        // Cycle complete: clear and reset
+        rewriteLabels('');
+        clearSelection();
+        selectionCycle = 0;
+        if (cycleEl) { cycleEl.textContent = ''; cycleEl.style.display = 'none'; }
+    } else {
+        replaceSelection(matches);
+        selectionCycle = level + 1;
+        rewriteLabels('[:]');
+        if (cycleEl) {
+            var kLabel = aVec.length === 0 ? level : aVec.length - level;
+            cycleEl.textContent = 'L' + (level + 1) + ': ' + _levelLabel(aVec, kLabel) + '  Ctrl+A\u2192more';
+            cycleEl.style.display = 'block';
+        }
+    }
+    onSelectionChanged();
+}
+
+// Select all features matching a given file and line (used by source panel clicks
+// and by the selectBySource postMessage handler).
+function _selectFeaturesBySource(targetFile, targetLine) {
+    targetFile = (targetFile || '').replace(/\\/g, '/');
+    targetLine = parseInt(targetLine, 10);
+    if (!targetFile || isNaN(targetLine)) return;
+
+    var matches = allFeatures.filter(function(f) {
+        var prov = f.get('provenance') || {};
+        var fFile = (prov.file || '').replace(/\\/g, '/');
+        var fBase = fFile.split('/').pop() || '';
+        var tBase = targetFile.split('/').pop() || '';
+        if (fBase !== tBase && fFile !== targetFile) return false;
+        var fLine = typeof prov.line === 'number' ? prov.line : parseInt(String(prov.line), 10);
+        return fLine === targetLine;
+    });
+
+    // Also check call_chain entries
+    var chainMatches = allFeatures.filter(function(f) {
+        var prov = f.get('provenance') || {};
+        var chain = prov.call_chain || [];
+        return chain.some(function(cc) {
+            var ccFile = (cc.file || '').replace(/\\/g, '/');
+            var ccBase = ccFile.split('/').pop() || '';
+            var tBase = targetFile.split('/').pop() || '';
+            if (ccBase !== tBase && ccFile !== targetFile) return false;
+            var ccLine = typeof cc.line === 'number' ? cc.line : parseInt(String(cc.line), 10);
+            return ccLine === targetLine;
+        });
+    });
+
+    // Merge, deduplicate by ol_uid
+    var seen = {};
+    var all = [];
+    matches.concat(chainMatches).forEach(function(f) {
+        if (!seen[f.ol_uid]) {
+            seen[f.ol_uid] = true;
+            all.push(f);
+        }
+    });
+
+    if (all.length > 0) {
+        replaceSelection(all);
+        onSelectionChanged();
+        var extent = all[0].getGeometry().getExtent().slice(0);
+        for (var i = 1; i < all.length; i++) {
+            ol.extent.extend(extent, all[i].getGeometry().getExtent());
+        }
+        map.getView().fit(extent, { padding: [60, 60, 60, 60], duration: 300 });
+    }
+}
+
+// Rewrite labels on selected features. For grouped selection, show one
+// [:] label per unique instance so each array group is marked.
+function rewriteLabels(label) {
+    var shown = {};
+    selectedFeatures.forEach(function(f) {
+        var prov = f.get('provenance') || {};
+        var instName = prov.instance_name || '';
+        var groupKey = instName;
+
+        if (label === '[:]') {
+            // For grouped selection, show label only on first element per array
+            if (!shown[groupKey]) {
+                f.set('label', '[:]');
+                shown[groupKey] = true;
+            } else {
+                f.set('label', '');
+            }
+        } else {
+            // Restore original label
+            var arrIdx = prov.array_index;
+            if (arrIdx && arrIdx.length > 0) {
+                f.set('label', '[' + arrIdx.join(', ') + ']');
+            } else {
+                f.set('label', '');
+            }
+        }
+    });
+}
+
+// ============================================================
+// Mode switching
+// ============================================================
+function setMode(mode) {
+    if (mode === currentMode && mode !== 'select') {
+        mode = 'select';
+    }
+    currentMode = mode;
+
+    Object.keys(drawInteractions).forEach(function(key) {
+        drawInteractions[key].setActive(false);
+    });
+
+    var isDrawMode = (mode !== 'select');
+    selectClick.setActive(!isDrawMode);
+    dragBox.setActive(!isDrawMode);
+
+    if (isDrawMode && drawInteractions[mode]) {
+        drawInteractions[mode].setActive(true);
+    }
+
+    document.querySelectorAll('.tool-btn[data-mode]').forEach(function(btn) {
+        if (btn.dataset.mode === 'snap' || btn.dataset.mode === 'delete') return;
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+}
+
+function deleteDrawn() {
+    var drawn = selectedFeatures.getArray().filter(function(f) { return f.get('isDrawn'); });
+    if (drawn.length === 0) return;
+    drawn.forEach(function(f) {
+        selectedFeatures.remove(f);
+        drawSource.removeFeature(f);
+    });
+    drawLayer.changed();
+    onSelectionChanged();
+}
+
+// ============================================================
+// Selection changed handler
+// ============================================================
+function onSelectionChanged() {
+    var features = selectedFeatures.getArray();
+    var count = features.length;
+
+    var hasDrawn = count > 0 && features.some(function(f) { return f.get('isDrawn'); });
+    modifyInteraction.setActive(hasDrawn);
+    translateInteraction.setActive(hasDrawn);
+
+    if (count === 0) {
+        postSelectedComponents([]);
+        return;
+    }
+
+    // Selection detail (source refs + geometry) is logged by the extension
+    // into the "GDS Navigator" Output channel — no in-viewer panels.
+    postSelectedComponents(features);
+}
+
+function postSelectedComponents(features) {
+    var msg = {
+        type: 'selectComponents',
+        components: componentsFromFeatures(features)
+    };
+    if (vscode) {
+        vscode.postMessage(msg);
+    } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+    }
+}
+
+function componentsFromFeatures(features) {
+    return features.map(function(f) {
+        var geom = f.getGeometry();
+        var extent = geom ? geom.getExtent() : [0, 0, 0, 0];
+        var comp = {
+            provId: f.ol_uid,
+            layer: f.get('layer') || '',
+            bbox: geomExtentToBbox(extent),
+            provenance: f.get('provenance') || {}
+        };
+        if (f.get('isDrawn')) {
+            comp.drawn = true;
+            comp.shape = getShapeGeom(f);
+        }
+        return comp;
+    });
+}
+
+// ============================================================
+// GDS GeoJSON format, source, and vector layer
+// ============================================================
+// GDS coordinates are in micrometers (um).  Prevent OpenLayers from
+// treating them as EPSG:4326 degrees and running them through the
+// Web-Mercator forward transform, which distorts and clips small values.
+var gdsGeoJsonFmt = new ol.format.GeoJSON({
+    dataProjection: 'EPSG:3857',
+    featureProjection: 'EPSG:3857',
+});
+
+var source = new ol.source.Vector();
+
+// Highlight style for selected feature
+var highlightStyle = new ol.style.Style({
+    stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 }),
+    fill: new ol.style.Fill({ color: 'rgba(255,255,255,0.3)' })
+});
+
+var vectorLayer = new ol.layer.Vector({
+    source: source,
+    style: function(feature) {
+        var selected = feature.get('selected');
+        var labelText = feature.get('label');
+        if (selected) {
+            if (labelText) {
+                return new ol.style.Style({
+                    stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 }),
+                    fill: new ol.style.Fill({ color: 'rgba(255,255,255,0.3)' }),
+                    text: new ol.style.Text({
+                        text: labelText,
+                        font: '10px monospace',
+                        fill: new ol.style.Fill({ color: '#f9e2af' }),
+                        stroke: new ol.style.Stroke({ color: '#1a1a2e', width: 2 })
+                    })
+                });
+            }
+            return highlightStyle;
+        }
+        var color = feature.get('color') || '#fff';
+        var visible = feature.get('visible') !== false;
+        if (!visible) return new ol.style.Style({});
+        var style = new ol.style.Style({
+            stroke: new ol.style.Stroke({ color: color, width: 1 }),
+            fill: new ol.style.Fill({ color: color + '80' })
+        });
+        if (labelText) {
+            style.setText(new ol.style.Text({
+                text: labelText,
+                font: '10px monospace',
+                fill: new ol.style.Fill({ color: '#f9e2af' }),
+                stroke: new ol.style.Stroke({ color: '#1a1a2e', width: 2 })
+            }));
+        }
+        return style;
+    }
+});
+
+// ============================================================
+// Map setup
+// ============================================================
+var map = new ol.Map({
+    target: 'map',
+    layers: [vectorLayer, drawLayer],
+    view: new ol.View({ center: [0, 0], zoom: 2, minZoom: -20, maxZoom: 40 }),
+    controls: []
+});
+
+// Select interaction -- multi-select capable
+var selectClick = new ol.interaction.Select({
+    layers: [vectorLayer, drawLayer],
+    style: null,  // use layer style function
+    multi: true
+});
+map.addInteraction(selectClick);
+
+selectClick.on('select', function(e) {
+    var clicked = e.selected.length > 0 ? e.selected[0] : null;
+
+    if (clicked) {
+        var alreadySelected = selectedFeatures.getArray().includes(clicked);
+        if (ctrlPressed) {
+            if (alreadySelected) {
+                removeFromSelection([clicked]);
+            } else {
+                addToSelection([clicked]);
+            }
+        } else {
+            replaceSelection([clicked]);
+        }
+    } else {
+        clearSelection();
+        return;
+    }
+
+    selectClick.getFeatures().clear();
+    if (!ctrlPressed) {
+        // Normal single selection: reset cycle and restore labels
+        rewriteLabels('');
+        selectionCycle = 0;
+        var cycleEl = document.getElementById('cycle-indicator');
+        if (cycleEl) { cycleEl.textContent = ''; cycleEl.style.display = 'none'; }
+    }
+    vectorLayer.changed();
+    drawLayer.changed();
+    onSelectionChanged();
+});
+
+// DragBox interaction for area selection
+var dragBox = new ol.interaction.DragBox({
+    condition: function(mapBrowserEvent) {
+        return ol.events.condition.mouseActionButton(mapBrowserEvent) &&
+               ol.events.condition.noModifierKeys(mapBrowserEvent) ||
+               ol.events.condition.platformModifierKeyOnly(mapBrowserEvent);
+    }
+});
+map.addInteraction(dragBox);
+
+var dragStartPixel = null;
+
+dragBox.on('boxstart', function(e) {
+    dragStartPixel = e.mapBrowserEvent.pixel;
+});
+
+dragBox.on('boxend', function(e) {
+    var extent = dragBox.getGeometry().getExtent();
+    var endPixel = e.mapBrowserEvent.pixel;
+    var dragDist = Math.sqrt(
+        Math.pow(endPixel[0] - dragStartPixel[0], 2) +
+        Math.pow(endPixel[1] - dragStartPixel[1], 2)
+    );
+
+    if (dragDist < 5) return;
+
+    var featuresInBox = [];
+    source.forEachFeatureInExtent(extent, function(f) {
+        if (f.get('visible') !== false) {
+            var geom = f.getGeometry();
+            if (geom && ol.extent.intersects(extent, geom.getExtent())) {
+                featuresInBox.push(f);
+            }
+        }
+    });
+    drawSource.forEachFeatureInExtent(extent, function(f) {
+        var geom = f.getGeometry();
+        if (geom && ol.extent.intersects(extent, geom.getExtent())) {
+            featuresInBox.push(f);
+        }
+    });
+
+    if (ctrlPressed) {
+        addToSelection(featuresInBox);
+    } else {
+        replaceSelection(featuresInBox);
+    }
+
+    vectorLayer.changed();
+    drawLayer.changed();
+    onSelectionChanged();
+});
+
+// --- Draw interactions (ephemeral measuring shapes; VS Code port does
+//     not persist annotations — saveAnnotation messages are ignored) ---
+var drawRectangle = new ol.interaction.Draw({
+    source: drawSource,
+    type: 'Circle',
+    geometryFunction: ol.interaction.Draw.createBox()
+});
+drawRectangle.setActive(false);
+map.addInteraction(drawRectangle);
+drawInteractions['rectangle'] = drawRectangle;
+
+var drawCircle = new ol.interaction.Draw({
+    source: drawSource,
+    type: 'Circle'
+});
+drawCircle.setActive(false);
+map.addInteraction(drawCircle);
+drawInteractions['circle'] = drawCircle;
+
+var drawLine = new ol.interaction.Draw({
+    source: drawSource,
+    type: 'LineString'
+});
+drawLine.setActive(false);
+map.addInteraction(drawLine);
+drawInteractions['line'] = drawLine;
+
+var drawPolygon = new ol.interaction.Draw({
+    source: drawSource,
+    type: 'Polygon'
+});
+drawPolygon.setActive(false);
+map.addInteraction(drawPolygon);
+drawInteractions['polygon'] = drawPolygon;
+
+Object.keys(drawInteractions).forEach(function(key) {
+    drawInteractions[key].on('drawend', function(e) {
+        var feature = e.feature;
+        feature.set('isDrawn', true);
+        feature.set('shapeType', key);
+        feature.set('selected', false);
+        setTimeout(function() { setMode('select'); }, 50);
+    });
+});
+
+// Modify interaction for drawn shape vertices
+var modifyInteraction = new ol.interaction.Modify({
+    source: drawSource,
+    style: new ol.style.Style({
+        image: new ol.style.Circle({
+            radius: 5,
+            fill: new ol.style.Fill({ color: '#f38ba8' }),
+            stroke: new ol.style.Stroke({ color: '#ffffff', width: 1 })
+        })
+    })
+});
+modifyInteraction.setActive(false);
+map.addInteraction(modifyInteraction);
+
+// Translate interaction for moving drawn shapes
+var translateInteraction = new ol.interaction.Translate({
+    layers: [drawLayer]
+});
+translateInteraction.setActive(false);
+map.addInteraction(translateInteraction);
+
+// Snap
+var gridSource = new ol.source.Vector();
+var snapGds = new ol.interaction.Snap({ source: source, pixelTolerance: 10 });
+var snapDraw = new ol.interaction.Snap({ source: drawSource, pixelTolerance: 10 });
+var snapGrid = new ol.interaction.Snap({ source: gridSource, pixelTolerance: 10 });
+snapGds.setActive(false);
+snapDraw.setActive(false);
+snapGrid.setActive(false);
+map.addInteraction(snapGds);
+map.addInteraction(snapDraw);
+map.addInteraction(snapGrid);
+
+function toggleSnap() {
+    snapActive = !snapActive;
+    snapGds.setActive(snapActive);
+    snapDraw.setActive(snapActive);
+    snapGrid.setActive(snapActive);
+
+    var btn = document.querySelector('.tool-btn[data-mode="snap"]');
+    btn.classList.toggle('active', snapActive);
+
+    if (snapActive) {
+        updateGridSnap();
+    } else {
+        gridSource.clear();
+    }
+}
+
+function updateGridSnap() {
+    if (!snapActive) return;
+
+    var view = map.getView();
+    var resolution = view.getResolution();
+    var extent = view.calculateExtent(map.getSize());
+
+    var rawSpacing = resolution * 80;
+    var exponent = Math.floor(Math.log10(rawSpacing));
+    var spacing = Math.pow(10, exponent);
+
+    var minX = Math.floor(extent[0] / spacing) * spacing;
+    var minY = Math.floor(extent[1] / spacing) * spacing;
+    var maxX = Math.ceil(extent[2] / spacing) * spacing;
+    var maxY = Math.ceil(extent[3] / spacing) * spacing;
+
+    var maxPoints = 2000;
+    var countX = Math.round((maxX - minX) / spacing) + 1;
+    var countY = Math.round((maxY - minY) / spacing) + 1;
+    if (countX * countY > maxPoints) return;
+
+    gridSource.clear();
+    for (var x = minX; x <= maxX; x += spacing) {
+        for (var y = minY; y <= maxY; y += spacing) {
+            var pt = new ol.Feature({ geometry: new ol.geom.Point([x, y]) });
+            gridSource.addFeature(pt);
+        }
+    }
+}
+
+map.getView().on('change:resolution', function() {
+    if (snapActive) updateGridSnap();
+});
+map.on('moveend', function() {
+    if (snapActive) updateGridSnap();
+});
+
+// ============================================================
+// Zoom controls
+// ============================================================
+function zoomIn() {
+    var view = map.getView();
+    var zoom = view.getZoom();
+    view.animate({ zoom: zoom + 1, duration: 200 });
+}
+
+function zoomOut() {
+    var view = map.getView();
+    var zoom = view.getZoom();
+    view.animate({ zoom: zoom - 1, duration: 200 });
+}
+
+// fitView
+function fitView() {
+    var extent = source.getExtent();
+    var drawnExtent = drawSource.getExtent();
+    if (drawnExtent && isFinite(drawnExtent[0])) {
+        extent = extent && isFinite(extent[0])
+            ? ol.extent.extend(extent.slice(), drawnExtent)
+            : drawnExtent;
+    }
+    if (extent && isFinite(extent[0])) {
+        map.getView().fit(extent, { padding: [40, 40, 40, 40], duration: 300 });
+    }
+}
+
+// ============================================================
+// Load GDS data (receives GeoJSON from extension via postMessage)
+// ============================================================
+function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
+    // Preserve viewport on rebuild so user doesn't lose zoom/pan
+    var isReload = allFeatures.length > 0;
+    var prevCenter = isReload ? map.getView().getCenter() : null;
+    var prevZoom = isReload ? map.getView().getZoom() : null;
+
+    currentGdsPath = gdsPath;
+    currentPythonFile = pythonFile || '';
+    currentFilePath = gdsPath;
+    currentMode2 = mode;
+    source.clear();
+    drawSource.clear();
+    selectedFeatures.clear();
+    allFeatures = [];
+    layerColors = {};
+
+    geojson.features.forEach(function(feature) {
+        var props = feature.properties || {};
+        var key = props.layer + '/' + props.data_type;
+        layerColors[key] = props.color;
+        var geom = gdsGeoJsonFmt.readGeometry(feature.geometry);
+        var f = new ol.Feature({ geometry: geom });
+        f.set('layer', key);
+        f.set('color', props.color);
+        f.set('layerKey', key);
+        f.set('visible', true);
+        f.set('selected', false);
+        f.set('provenance', props.provenance || {});
+        f.set('meta', {
+            area_um2: props.area_um2,
+            vertex_count: props.vertex_count,
+            bbox: props.bbox || []
+        });
+        allFeatures.push(f);
+        source.addFeature(f);
+    });
+
+    // Recalculate map size before fitting — the map may have been
+    // created before the webview container had its final dimensions.
+    map.updateSize();
+
+    if (allFeatures.length > 0 && isReload && prevCenter && prevZoom !== null) {
+        map.getView().setCenter(prevCenter);
+        map.getView().setZoom(prevZoom);
+    } else if (allFeatures.length > 0) {
+        var sz = map.getSize();
+        if (sz && sz[0] >= 10 && sz[1] >= 10) {
+            fitView();
+        } else {
+            _pendingFit = true;
+        }
+        // OpenLayers may not render features added while the canvas had
+        // zero dimensions (common when the webview panel first appears).
+        // Re-fit after the browser has painted the canvas.
+        setTimeout(function() {
+            map.updateSize();
+            fitView();
+        }, 200);
+    }
+
+    (annotations || []).forEach(function(annotation) {
+        drawSource.addFeature(featureFromSavedAnnotation(annotation));
+    });
+
+    if (currentPythonFile) {
+        vscode && vscode.postMessage({ type: 'viewerContext', pythonFile: currentPythonFile });
+    }
+
+    buildLegend();
+
+    // Update provenance indicator (must be after buildLegend which recreates it)
+    updateModeIndicator(mode);
+}
+
+function updateModeIndicator(mode) {
+    var indicator = document.getElementById('mode-indicator');
+    if (!indicator) return;
+    if (mode === 'full') {
+        indicator.textContent = 'Provenance: ON';
+        indicator.className = '';
+        indicator.onclick = null;
+        indicator.title = '';
+    } else {
+        indicator.textContent = 'Provenance: OFF — click to associate .py';
+        indicator.className = 'partial';
+        indicator.title = 'No provenance sidecar found. Click to appoint the Python script that generates this GDS.';
+        indicator.onclick = function() {
+            vscode && vscode.postMessage({ type: 'associateScript' });
+        };
+    }
+}
+
+// ============================================================
+// Utility functions
+// ============================================================
+function polyMeta(ring) {
+    var xs = ring.map(function(p) { return p[0]; });
+    var ys = ring.map(function(p) { return p[1]; });
+    var area = 0;
+    for (var i = 0; i < xs.length - 1; i++) area += xs[i] * ys[i+1] - xs[i+1] * ys[i];
+    area = Math.abs(area) / 2;
+    return {
+        area_um2: Math.round(area * 1e4) / 1e4,
+        vertex_count: ring.length - 1,
+        bbox: [min(xs), min(ys), max(xs), max(ys)]
+    };
+}
+
+function min(arr) { return arr.reduce(function(a, b) { return Math.min(a, b); }); }
+function max(arr) { return arr.reduce(function(a, b) { return Math.max(a, b); }); }
+
+// ============================================================
+// Annotation serialization helpers
+// ============================================================
+function geomExtentToBbox(extent) {
+    return [extent[0], extent[1], extent[2], extent[3]];
+}
+
+function drawnFeaturePayload(feature) {
+    var geom = feature.getGeometry();
+    if (!geom) return null;
+    var shapeType = feature.get('shapeType') || 'shape';
+    var extent = geom.getExtent();
+    var bbox = geomExtentToBbox(extent);
+    var geometry = { type: geom.getType(), bbox: bbox };
+    if (geom.getType() === 'Circle') {
+        var center = geom.getCenter();
+        geometry.center = [center[0], center[1]];
+        geometry.radius = geom.getRadius();
+    }
+    var ring = [];
+    if (geom.getType() === 'Polygon') {
+        var coords = geom.getCoordinates();
+        if (coords && coords[0]) ring = coords[0];
+    }
+    var meta = ring.length > 0
+        ? { area_um2: polyMeta(ring).area_um2, vertex_count: polyMeta(ring).vertex_count }
+        : { area_um2: shapeType === 'circle' ? Math.round(Math.PI * Math.pow(geom.getRadius(), 2) * 1e4) / 1e4 : 0, vertex_count: 0 };
+    return {
+        shapeType: shapeType,
+        geometry: geometry,
+        meta: meta
+    };
+}
+
+function featureFromSavedAnnotation(annotation) {
+    var shapeType = annotation.shapeType || 'shape';
+    var g = annotation.geometry || {};
+    var bbox = g.bbox || [0, 0, 1, 1];
+    var geom;
+    if (shapeType === 'circle' && g.center && g.radius !== undefined) {
+        geom = new ol.geom.Circle(g.center, g.radius);
+    } else if (shapeType === 'line') {
+        geom = new ol.geom.LineString([[bbox[0], bbox[1]], [bbox[2], bbox[3]]]);
+    } else {
+        geom = new ol.geom.Polygon([[
+            [bbox[0], bbox[1]], [bbox[2], bbox[1]], [bbox[2], bbox[3]], [bbox[0], bbox[3]], [bbox[0], bbox[1]]
+        ]]);
+    }
+    var feature = new ol.Feature({ geometry: geom });
+    feature.set('isDrawn', true);
+    feature.set('shapeType', shapeType);
+    feature.set('annotationPath', annotation.jsonPath);
+    feature.set('selected', false);
+    feature.set('provenance', annotation.provenance || {});
+    feature.set('meta', annotation.meta || {});
+    return feature;
+}
+
+function applySavedAnnotation(feature, annotation) {
+    feature.set('annotationPath', annotation.jsonPath);
+    feature.set('provenance', annotation.provenance || {});
+    feature.set('meta', annotation.meta || {});
+    feature.set('shapeType', annotation.shapeType || feature.get('shapeType') || 'shape');
+}
+
+// ============================================================
+// Legend
+// ============================================================
+function buildLegend() {
+    var existing = document.querySelector('.legend-section');
+    if (existing) existing.remove();
+    var keys = Object.keys(layerColors);
+    if (!keys.length) return;
+    var div = document.createElement('div');
+    div.className = 'legend-section';
+    div.style.marginTop = '12px';
+    div.innerHTML = '<div id="mode-indicator">Loading...</div><div id="cycle-indicator" class="mode-indicator partial" style="display:none; margin-top: 4px;"></div><h4 style="margin:0 0 6px 0;color:#89b4fa;">Layers</h4>';
+    keys.forEach(function(key) {
+        var row = document.createElement('div');
+        row.className = 'legend-row';
+        row.innerHTML = '<span class="swatch" style="background:' + layerColors[key] + ';" data-key="' + key + '"></span> ' + key;
+        row.onclick = function() {
+            var swatch = row.querySelector('.swatch');
+            var hidden = swatch.classList.toggle('hidden');
+            allFeatures.forEach(function(f) { if (f.get('layerKey') === key) f.set('visible', !hidden); });
+            vectorLayer.changed();
+        };
+        div.appendChild(row);
+    });
+    document.getElementById('sidebar').appendChild(div);
+}
+
+function _normalizeCallChain(prov) {
+    var entries;
+    // Handle call_chain (from provenance_inject.py): array of {file, function, line}
+    if (prov.call_chain && Array.isArray(prov.call_chain)) {
+        entries = prov.call_chain.map(function(cc) {
+            return { file: cc.file || '', function: cc.function || '', line: parseInt(cc.line) || 0 };
+        });
+    } else if (prov.call_stack && Array.isArray(prov.call_stack)) {
+        // Handle call_stack (from provenance.py): array of "file:line in function"
+        entries = prov.call_stack.map(function(cs) {
+            var m = cs.match(/^(.+?):(\d+)\s+in\s+(.+)$/);
+            if (m) return { file: m[1], line: parseInt(m[2]), function: m[3] };
+            return { file: cs, line: 0, function: '' };
+        });
+    } else {
+        return [];
+    }
+    // Skip entries that duplicate the primary file:line
+    var primaryFile = (prov.file || '').replace(/\\/g, '/');
+    var primaryLine = parseInt(prov.line) || 0;
+    if (primaryFile && primaryLine) {
+        entries = entries.filter(function(e) {
+            var ef = (e.file || '').replace(/\\/g, '/');
+            return ef !== primaryFile || e.line !== primaryLine;
+        });
+    }
+    return entries;
+}
+
+// ============================================================
+// Drawn shape geometry utils
+// ============================================================
+function getShapeGeom(feature) {
+    var type = feature.get('shapeType');
+    var geom = feature.getGeometry();
+    var result = { type: type };
+
+    if (type === 'rectangle' || type === 'polygon') {
+        var coords = geom.getCoordinates()[0];
+        result.coordinates = coords.slice(0, -1).map(function(c) { return [Math.round(c[0] * 100) / 100, Math.round(c[1] * 100) / 100]; });
+        var ext = geom.getExtent();
+        result.bbox = [Math.round(ext[0] * 100) / 100, Math.round(ext[1] * 100) / 100, Math.round(ext[2] * 100) / 100, Math.round(ext[3] * 100) / 100];
+        result.width = Math.round((ext[2] - ext[0]) * 100) / 100;
+        result.height = Math.round((ext[3] - ext[1]) * 100) / 100;
+        result.center = [Math.round((ext[0] + ext[2]) / 2 * 100) / 100, Math.round((ext[1] + ext[3]) / 2 * 100) / 100];
+        var area = 0;
+        for (var i = 0; i < coords.length - 1; i++) {
+            area += coords[i][0] * coords[i + 1][1] - coords[i + 1][0] * coords[i][1];
+        }
+        result.area = Math.round(Math.abs(area) / 2 * 100) / 100;
+    } else if (type === 'circle') {
+        var center = geom.getCenter();
+        var radius = geom.getRadius();
+        result.center = [Math.round(center[0] * 100) / 100, Math.round(center[1] * 100) / 100];
+        result.radius = Math.round(radius * 100) / 100;
+        result.bbox = [
+            Math.round((center[0] - radius) * 100) / 100,
+            Math.round((center[1] - radius) * 100) / 100,
+            Math.round((center[0] + radius) * 100) / 100,
+            Math.round((center[1] + radius) * 100) / 100
+        ];
+    } else if (type === 'line') {
+        var coords = geom.getCoordinates();
+        result.coordinates = coords.map(function(c) { return [Math.round(c[0] * 100) / 100, Math.round(c[1] * 100) / 100]; });
+        var len = 0;
+        for (var i = 1; i < coords.length; i++) {
+            var dx = coords[i][0] - coords[i - 1][0];
+            var dy = coords[i][1] - coords[i - 1][1];
+            len += Math.sqrt(dx * dx + dy * dy);
+        }
+        result.length = Math.round(len * 100) / 100;
+    }
+
+    return result;
+}
+
+// ============================================================
+// shapeToYAML
+// ============================================================
+function shapeToYAML(sg) {
+    var lines = [];
+    lines.push('shape: ' + sg.type);
+    if (sg.coordinates) lines.push('coordinates: ' + JSON.stringify(sg.coordinates));
+    if (sg.bbox) lines.push('bbox: ' + JSON.stringify(sg.bbox));
+    if (sg.width !== undefined) lines.push('width: ' + sg.width);
+    if (sg.height !== undefined) lines.push('height: ' + sg.height);
+    if (sg.center) lines.push('center: ' + JSON.stringify(sg.center));
+    if (sg.radius !== undefined) lines.push('radius: ' + sg.radius);
+    if (sg.length !== undefined) lines.push('length: ' + sg.length);
+    if (sg.area !== undefined) lines.push('area: ' + sg.area);
+    return lines;
+}
+
+// ============================================================
+// Copy YAML (VS Code webview: extension writes to clipboard)
+// ============================================================
+function copyYAML(e) {
+    e.stopPropagation();
+    var features = selectedFeatures.getArray();
+    if (features.length === 0) {
+        // Make the empty-selection case visible instead of silently no-oping.
+        var btn0 = document.getElementById('copy-btn');
+        btn0.classList.add('copied');
+        btn0.title = 'Nothing selected';
+        setTimeout(function() { btn0.classList.remove('copied'); btn0.title = 'Copy selection as YAML (Ctrl+Shift+C)'; }, 1500);
+        vscode && vscode.postMessage({ type: 'debugInfo', where: 'copyYAML', message: 'empty selection — nothing copied' });
+        return;
+    }
+
+    var drawnFeatures = features.filter(function(f) { return f.get('isDrawn'); });
+    var gdsFeatures = features.filter(function(f) { return !f.get('isDrawn'); });
+
+    var lines = [];
+
+    if (gdsFeatures.length > 0) {
+        // GDS components: show as xxx.py Component N: Line X, bbox:[...]
+        var seenCallChain = {};
+        gdsFeatures.forEach(function(f, idx) {
+            var prov = f.get('provenance') || {};
+            var g = f.getGeometry();
+            var fBbox = g ? geomExtentToBbox(g.getExtent()) : [];
+            var bboxStr = '[' + fBbox.map(function(v) { return v.toFixed(4); }).join(', ') + ']';
+            var base = (prov.file || '').split('/').pop();
+            var lineNum = prov.line || '?';
+            lines.push(base + ' Component ' + (idx + 1) + ': Line ' + lineNum + ', bbox:' + bboxStr);
+            if (Array.isArray(prov.loop_index) && prov.loop_index.length) {
+                lines.push('  loop_index: ' + _fmtIdx(prov.loop_index) + '  # zero-based, outermost first');
+            }
+            if (Array.isArray(prov.array_index) && prov.array_index.length) {
+                lines.push('  array_index: ' + _fmtIdx(prov.array_index));
+            }
+            // Include call chain so AI agent sees full compilation context
+            var chain = _normalizeCallChain(prov);
+            if (chain.length > 0) {
+                lines.push('  call_chain:');
+                chain.forEach(function(cc) {
+                    var loc = '@' + (cc.file || '') + '#' + (cc.line || '?');
+                    var fn = cc.function ? ' (' + cc.function + ')' : '';
+                    var key = loc + fn;
+                    if (!seenCallChain[key]) {
+                        seenCallChain[key] = true;
+                        lines.push('    - ' + loc + fn);
+                    }
+                });
+            }
+        });
+    }
+
+    if (drawnFeatures.length > 0) {
+        if (lines.length > 0) lines.push('');
+        if (drawnFeatures.length === 1 && gdsFeatures.length === 0) {
+            var sg = getShapeGeom(drawnFeatures[0]);
+            lines = lines.concat(shapeToYAML(sg));
+        } else {
+            lines.push('annotations:');
+            drawnFeatures.forEach(function(f) {
+                var sg = getShapeGeom(f);
+                lines.push('  - shape: ' + sg.type);
+                if (sg.bbox) lines.push('    bbox: ' + JSON.stringify(sg.bbox));
+                if (sg.width !== undefined) lines.push('    width: ' + sg.width);
+                if (sg.height !== undefined) lines.push('    height: ' + sg.height);
+                if (sg.center) lines.push('    center: ' + JSON.stringify(sg.center));
+                if (sg.radius !== undefined) lines.push('    radius: ' + sg.radius);
+                if (sg.length !== undefined) lines.push('    length: ' + sg.length);
+                if (sg.area !== undefined) lines.push('    area: ' + sg.area);
+            });
+        }
+    }
+
+    if (lines.length === 0) {
+        lines = ['# No data to copy'];
+    }
+
+    var text = lines.join('\n');
+    vscode && vscode.postMessage({ type: 'exportYaml', yaml: text });
+    // Write directly from the webview as well: the click gives this document
+    // focus, so navigator.clipboard works; the extension host's
+    // vscode.env.clipboard write has been observed to silently no-op.
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(function () { /* extension-side copy is the fallback */ });
+    }
+    var btn = document.getElementById('copy-btn');
+    btn.classList.add('copied');
+    btn.title = 'YAML copied to clipboard';
+    setTimeout(function() { btn.classList.remove('copied'); btn.title = 'Copy selection as YAML (Ctrl+Shift+C)'; }, 2000);
+}
+
+// ============================================================
+// Action bar: Run / rebuild
+// ============================================================
+function rebuildScript() {
+    var btn = document.getElementById('run-btn');
+    btn.classList.add('running');
+    document.getElementById('rebuild-overlay').classList.add('visible');
+    vscode && vscode.postMessage({ type: 'rebuild' });
+}
+
+function onRebuildComplete() {
+    var btn = document.getElementById('run-btn');
+    btn.classList.remove('running');
+    document.getElementById('rebuild-overlay').classList.remove('visible');
+}
+
+// ============================================================
+// Handle messages from extension
+// ============================================================
+window.addEventListener('message', function(event) {
+    var message = event.data;
+    switch (message.type) {
+        case 'ping':
+            // Respond to extension polling
+            if (vscode) vscode.postMessage({ type: 'webviewReady' });
+            else if (window.parent !== window) window.parent.postMessage({ type: 'webviewReady' }, '*');
+            break;
+        case 'loadGds':
+            onRebuildComplete();
+            loadGdsData(
+                message.geojson,
+                message.gdsPath,
+                message.pythonFile || '',
+                message.annotations || [],
+                message.mode
+            );
+            break;
+        case 'setMode':
+            currentMode2 = message.mode;
+            updateModeIndicator(message.mode);
+            break;
+        case 'rebuildError':
+            onRebuildComplete();
+            break;
+        case 'selectBySource':
+            _selectFeaturesBySource((message.file || '').replace(/\\/g, '/'), message.line);
+            break;
+        case 'requestYaml':
+            // Triggered by the "GDS: Copy Selection as YAML" command —
+            // copies via exportYaml -> extension clip.exe path.
+            try {
+                copyYAML({ stopPropagation: function () {} });
+                vscode && vscode.postMessage({ type: 'debugInfo', where: 'requestYaml', message: 'copyYAML returned without throwing' });
+            } catch (err) {
+                vscode && vscode.postMessage({ type: 'debugError', where: 'requestYaml', message: String((err && err.message) || err) });
+            }
+            break;
+        case 'loadImage':
+            try {
+                insertMicroImage(message.dataUrl, message.fileName || 'image');
+            } catch (err) {
+                vscode && vscode.postMessage({ type: 'debugError', where: 'loadImage', message: String((err && err.message) || err) });
+            }
+            break;
+    }
+});
+
+// ============================================================
+// Microscope image overlay + fully automatic edge-based alignment
+// ============================================================
+var microImg = null;   // {img: HTMLImageElement, name, cx, cy, umPerPx, rotDeg, opacity}
+var microLayer = null; // ol.layer.Image (recreated on transform change)
+var imgMoveMode = false;
+
+function imgStatus(text) {
+    var overlay = document.getElementById('rebuild-overlay');
+    if (!overlay) return;
+    if (!text) { overlay.classList.remove('visible'); return; }
+    overlay.classList.add('visible');
+    overlay.innerHTML = '<div class="spinner"></div>' + text;
+}
+
+function insertMicroImage(dataUrl, name) {
+    var img = new Image();
+    img.onload = function () {
+        var ext = map.getView().calculateExtent(map.getSize());
+        var wUm = (ext[2] - ext[0]) * 0.6;
+        microImg = {
+            img: img,
+            name: name,
+            cx: (ext[0] + ext[2]) / 2,
+            cy: (ext[1] + ext[3]) / 2,
+            umPerPx: wUm / img.naturalWidth,
+            rotDeg: 0,
+            opacity: 0.55
+        };
+        renderMicroLayer();
+        vscode && vscode.postMessage({
+            type: 'imageTransform',
+            fileName: name,
+            cx: round2(microImg.cx), cy: round2(microImg.cy),
+            umPerPx: round4(microImg.umPerPx), rotDeg: 0,
+            note: 'inserted at view center — run auto-align'
+        });
+    };
+    img.onerror = function () {
+        vscode && vscode.postMessage({ type: 'debugError', where: 'insertMicroImage', message: 'browser could not decode ' + name + ' (convert TIFF to PNG/JPG first)' });
+    };
+    img.src = dataUrl;
+}
+
+function round2(v) { return Math.round(v * 100) / 100; }
+function round4(v) { return Math.round(v * 10000) / 10000; }
+
+/** Recreate the OL image layer from the current transform (rotation is baked
+ *  into an offscreen canvas because ImageStatic is axis-aligned). */
+function renderMicroLayer() {
+    if (!microImg) return;
+    if (microLayer) {
+        map.removeLayer(microLayer);
+        microLayer = null;
+    }
+    var img = microImg.img;
+    var rad = microImg.rotDeg * Math.PI / 180;
+    var cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+    var wPx = Math.ceil(img.naturalWidth * cos + img.naturalHeight * sin);
+    var hPx = Math.ceil(img.naturalWidth * sin + img.naturalHeight * cos);
+    var cv = document.createElement('canvas');
+    cv.width = wPx; cv.height = hPx;
+    var ctx = cv.getContext('2d');
+    ctx.translate(wPx / 2, hPx / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    var wUm = wPx * microImg.umPerPx, hUm = hPx * microImg.umPerPx;
+    microLayer = new ol.layer.Image({
+        source: new ol.source.ImageStatic({
+            imageExtent: [microImg.cx - wUm / 2, microImg.cy - hUm / 2, microImg.cx + wUm / 2, microImg.cy + hUm / 2],
+            url: cv.toDataURL('image/png')
+        }),
+        opacity: microImg.opacity,
+        zIndex: 10
+    });
+    map.addLayer(microLayer);
+}
+
+function reportTransform(note) {
+    if (!microImg || !vscode) return;
+    vscode.postMessage({
+        type: 'imageTransform',
+        fileName: microImg.name,
+        cx: round2(microImg.cx), cy: round2(microImg.cy),
+        umPerPx: round4(microImg.umPerPx), rotDeg: round2(microImg.rotDeg),
+        note: note || ''
+    });
+}
+
+// ---- manual adjustment (img-move mode) ----
+(function () {
+    var dragging = false, lastPx = null;
+    map.on('pointerdown', function (e) {
+        if (!imgMoveMode || !microImg) return;
+        dragging = true; lastPx = e.pixel;
+    });
+    map.on('pointermove', function (e) {
+        if (!dragging || !microImg) return;
+        var dxPx = e.pixel[0] - lastPx[0], dyPx = e.pixel[1] - lastPx[1];
+        lastPx = e.pixel;
+        var res = map.getView().getResolution();
+        microImg.cx += dxPx * res;
+        microImg.cy -= dyPx * res;
+        renderMicroLayer();
+    });
+    map.on('pointerup', function () {
+        if (dragging) { dragging = false; reportTransform('moved'); }
+    });
+    map.getViewport().addEventListener('wheel', function (e) {
+        if (!imgMoveMode || !microImg) return;
+        e.preventDefault();
+        var f = e.deltaY < 0 ? 1.05 : 1 / 1.05;
+        microImg.umPerPx /= f;
+        renderMicroLayer();
+        reportTransform('scale ' + round4(microImg.umPerPx) + ' um/px');
+    }, { passive: false, capture: true });
+})();
+
+function nudgeMicroImage(dxUm, dyUm) {
+    if (!microImg) return;
+    microImg.cx += dxUm; microImg.cy += dyUm;
+    renderMicroLayer();
+    reportTransform('nudged');
+}
+
+function rotateMicroImage(deg) {
+    if (!microImg) return;
+    microImg.rotDeg += deg;
+    renderMicroLayer();
+    reportTransform('rotated');
+}
+
+
+// ============================================================
+// Marker-pitch prior: microscope photos of marker-grid chips have a strong
+// periodicity. Measuring it in the photo (edge autocorrelation) and in the
+// layout (nearest-neighbour histogram) solves the SCALE directly, and a
+// tiled translation search handles small FOVs that exceed the canvas cap.
+// ============================================================
+
+/** Dominant grid pitch (um) among square-ish layout features. */
+function estimateLayoutPitch() {
+    var pts = [];
+    allFeatures.forEach(function (f) {
+        if (f.get('isDrawn') || f.get('visible') === false) return;
+        var e = f._extentCache || (f._extentCache = f.getGeometry().getExtent());
+        var w = e[2] - e[0], h = e[3] - e[1];
+        if (Math.abs(w - h) < Math.max(2, 0.2 * w) && w < 120) {
+            pts.push([(e[0] + e[2]) / 2, (e[1] + e[3]) / 2]);
+        }
+    });
+    if (pts.length < 20) return null;
+    var hist = {};
+    var stepN = Math.min(pts.length, 400);
+    for (var i = 0; i < stepN; i++) {
+        var best = 1e9;
+        for (var j = 0; j < stepN; j++) {
+            if (i === j) continue;
+            var dx = pts[i][0] - pts[j][0], dy = pts[i][1] - pts[j][1];
+            var d = Math.sqrt(dx * dx + dy * dy);
+            if (d < best) best = d;
+        }
+        if (best > 15 && best < 3000) {
+            var k = Math.round(best / 10) * 10;
+            hist[k] = (hist[k] || 0) + 1;
+        }
+    }
+    var bestK = null, bestC = 0;
+    for (var kk in hist) {
+        if (hist[kk] > bestC) { bestC = hist[kk]; bestK = +kk; }
+    }
+    return bestC >= stepN * 0.4 ? bestK : null;
+}
+
+/** Dominant periodicity (px) of the photo's edge map, via 1-D autocorrelation
+ *  of the row- and column-projections. Returns null when no clear peak. */
+function estimateImagePitch() {
+    var img = microImg.img;
+    var W = 1024;
+    var H = Math.max(32, Math.round(W * img.naturalHeight / img.naturalWidth));
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = '#808080'; ctx.fillRect(0, 0, W, H);
+    ctx.drawImage(img, 0, 0, W, H);
+    var d = ctx.getImageData(0, 0, W, H).data;
+    var gray = new Float32Array(W * H);
+    var i, p;
+    for (i = 0, p = 0; i < gray.length; i++, p += 4) {
+        gray[i] = 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2];
+    }
+    // Sobel magnitude bitmap
+    var E = new Uint8Array(W * H);
+    var x, y;
+    for (y = 1; y < H - 1; y++) {
+        for (x = 1; x < W - 1; x++) {
+            var idx = y * W + x;
+            var gx2 = (gray[idx - W + 1] + 2 * gray[idx + 1] + gray[idx + W + 1]) -
+                      (gray[idx - W - 1] + 2 * gray[idx - 1] + gray[idx + W - 1]);
+            var gy2 = (gray[idx + W - 1] + 2 * gray[idx + W] + gray[idx + W + 1]) -
+                      (gray[idx - W - 1] + 2 * gray[idx - W] + gray[idx - W + 1]);
+            if (Math.sqrt(gx2 * gx2 + gy2 * gy2) > 60) E[idx] = 1;
+        }
+    }
+    function pitchOfAxis(proj) {
+        var n = proj.length, mean = 0, j;
+        for (j = 0; j < n; j++) mean += proj[j];
+        mean /= n;
+        var v = new Float32Array(n);
+        for (j = 0; j < n; j++) v[j] = proj[j] - mean;
+        var var0 = 0;
+        for (j = 0; j < n; j++) var0 += v[j] * v[j];
+        function ac(lag) {
+            var acc = 0;
+            for (var k = 0; k + lag < n; k++) acc += v[k] * v[k + lag];
+            return acc / (n - lag);
+        }
+        // first LOCAL maximum (over +/-4 lags) exceeding 30% of the zero-lag
+        // variance — the unit-cell pitch, ignoring its multiples
+        for (var lag = 6; lag < n / 2; lag++) {
+            var a = ac(lag);
+            if (a < 0.30 * var0 / n) continue;
+            var isMax = true;
+            for (var d = -4; d <= 4; d++) {
+                if (d !== 0 && lag + d >= 6 && ac(lag + d) > a) { isMax = false; break; }
+            }
+            if (isMax) return lag;
+        }
+        return -1;
+    }
+    var rowProj = new Float32Array(W), colProj = new Float32Array(H);
+    for (y = 0; y < H; y++) for (x = 0; x < W; x++) {
+        if (E[y * W + x]) { rowProj[x] += 1; colProj[y] += 1; }
+    }
+    var px = pitchOfAxis(rowProj), py = pitchOfAxis(colProj);
+    if (px < 0 && py < 0) return null;
+    var cands = [px, py].filter(function (v) { return v > 0; });
+    cands.sort(function (a, b) { return a - b; });
+    return cands[0]; // smallest strong period = unit cell pitch
+}
+
+// ============================================================
+// Automatic edge-based registration
+// ============================================================
+
+/** Layout edge bitmap over `region` [minx,miny,maxx,maxy] um at `w x h` px. */
+function layoutEdgeMap(region, w, h) {
+    var cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    var rx = region[0], ry = region[1];
+    var sx = w / (region[2] - region[0]), sy = h / (region[3] - region[1]);
+    allFeatures.forEach(function (f) {
+        var g = f.getGeometry();
+        if (!g || f.get('isDrawn')) return;
+        if (f.get('visible') === false) return; // layer hidden in the legend = not an alignment reference
+        // cheap bbox reject: full-chip layouts have 100k+ features, a local
+        // refine region only intersects a small fraction of them
+        var fe = f._extentCache || (f._extentCache = g.getExtent());
+        if (fe[2] < region[0] || fe[0] > region[2] || fe[3] < region[1] || fe[1] > region[3]) return;
+        var ring = g.getCoordinates()[0];
+        if (!ring || ring.length < 3) return;
+        ctx.beginPath();
+        ring.forEach(function (p, i) {
+            var X = (p[0] - rx) * sx, Y = h - (p[1] - ry) * sy;
+            if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
+        });
+        ctx.closePath();
+        ctx.stroke();
+    });
+    var d = ctx.getImageData(0, 0, w, h).data;
+    var L = new Uint8Array(w * h);
+    for (var i = 0, p = 0; i < L.length; i++, p += 4) {
+        if (d[p] > 96) L[i] = 1;
+    }
+    return L;
+}
+
+/** Sobel edge points of the micro image drawn into the region canvas with the
+ *  given candidate transform. Returns a flat [x0,y0,x1,y1,...] px array. */
+function imageEdgePoints(region, w, h, cx, cy, umPerPx, rotDeg, maxPts) {
+    var cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    var ctx = cv.getContext('2d');
+    var img = microImg.img;
+    var k = umPerPx * (w / (region[2] - region[0])); // image px -> canvas px
+    ctx.translate((cx - region[0]) / (region[2] - region[0]) * w,
+                  h - (cy - region[1]) / (region[3] - region[1]) * h);
+    ctx.rotate(rotDeg * Math.PI / 180);
+    ctx.scale(k, k);
+    ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    var d = ctx.getImageData(0, 0, w, h).data;
+    var gray = new Float32Array(w * h);
+    var i, p;
+    for (i = 0, p = 0; i < gray.length; i++, p += 4) {
+        gray[i] = d[p + 3] > 100 ? 0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2] : -1;
+    }
+    // Sobel magnitude + adaptive threshold (keep strongest 10%)
+    var mags = [];
+    var mag = new Float32Array(w * h);
+    var gxArr = new Float32Array(w * h);
+    var gyArr = new Float32Array(w * h);
+    var x, y, idx;
+    for (y = 1; y < h - 1; y++) {
+        for (x = 1; x < w - 1; x++) {
+            idx = y * w + x;
+            var a = gray[idx - w - 1], b = gray[idx - w], c = gray[idx - w + 1];
+            var dd = gray[idx - 1], ff = gray[idx + 1];
+            var g1 = gray[idx + w - 1], g2 = gray[idx + w], g3 = gray[idx + w + 1];
+            if (a < 0 || c < 0 || g1 < 0 || g3 < 0 || dd < 0 || ff < 0) continue;
+            var gx = (c + 2 * ff + g3) - (a + 2 * dd + g1);
+            var gy = (g1 + 2 * g2 + g3) - (a + 2 * b + c);
+            var m = Math.sqrt(gx * gx + gy * gy);
+            mag[idx] = m;
+            gxArr[idx] = gx; gyArr[idx] = gy;
+            if (m > 0) mags.push(m);
+        }
+    }
+    if (!mags.length) return new Int16Array(0);
+    // O(n) bucket select for the 90th-percentile threshold (sort was a
+    // hotspot: the array holds every gradient pixel of the canvas)
+    var hist = new Uint32Array(1024);
+    var mmax = 0, mi;
+    for (mi = 0; mi < mags.length; mi++) if (mags[mi] > mmax) mmax = mags[mi];
+    for (mi = 0; mi < mags.length; mi++) hist[Math.min(1023, (mags[mi] / (mmax || 1) * 1023) | 0)]++;
+    var want = Math.floor(mags.length * 0.10), acc = 0, bi = 1023;
+    for (; bi >= 0; bi--) { acc += hist[bi]; if (acc >= want) break; }
+    var thr = (bi / 1023) * (mmax || 1);
+    // Non-maximum suppression along the gradient direction: keeps one-pixel
+    // wide edges (downsampling would otherwise double every stroke edge).
+    var pts = [];
+    for (y = 1; y < h - 1; y++) {
+        for (x = 1; x < w - 1; x++) {
+            idx = y * w + x;
+            var mm = mag[idx];
+            if (mm < thr) continue;
+            var gxa = gxArr[idx], gya = gyArr[idx];
+            var dIdx;
+            if (Math.abs(gxa) > 2 * Math.abs(gya)) dIdx = 1;        // E-W
+            else if (Math.abs(gya) > 2 * Math.abs(gxa)) dIdx = w;   // N-S
+            else if ((gxa > 0) === (gya > 0)) dIdx = w + 1;         // diag
+            else dIdx = w - 1;                                      // anti-diag
+            if (mm >= mag[idx - dIdx] && mm >= mag[idx + dIdx]) pts.push(x, y);
+        }
+    }
+    // append gradient-orientation bucket (0..3, 45-deg sectors) per point so
+    // the scorer can demand direction agreement, not just proximity
+    var out = [];
+    for (var q = 0; q < pts.length; q += 2) {
+        var qi = pts[q + 1] * w + pts[q];
+        var gxa = gxArr[qi], gya = gyArr[qi];
+        var sector = Math.round(Math.atan2(gya, gxa) / (Math.PI / 4));
+        var b = ((sector % 4) + 4) % 4;
+        out.push(pts[q], pts[q + 1], b);
+    }
+    var stride = Math.max(1, Math.floor(out.length / 3 / (maxPts || 6000)));
+    var out2 = [];
+    for (var q2 = 0; q2 < out.length; q2 += 3 * stride) out2.push(out[q2], out[q2 + 1], out[q2 + 2]);
+    return new Int16Array(out2);
+}
+
+/** Two-pass chamfer distance transform of the binary layout map: D[p] is
+ *  the distance (px) to the nearest layout edge. Enables smooth, sub-pixel
+ *  sensitive alignment scoring (binary hit/miss cannot resolve <1% scale
+ *  errors, which drift markers by a full pitch at the FOV edges). */
+function layoutDistMap(L, w, h) {
+    var INF = 1e9;
+    var D = new Float32Array(w * h);
+    var i, x, y;
+    for (i = 0; i < D.length; i++) D[i] = L[i] ? 0 : INF;
+    var D2 = Math.SQRT2;
+    // forward pass
+    for (y = 0; y < h; y++) {
+        for (x = 0; x < w; x++) {
+            i = y * w + x;
+            var v = D[i];
+            if (x > 0) v = Math.min(v, D[i - 1] + 1);
+            if (y > 0) {
+                v = Math.min(v, D[i - w] + 1);
+                if (x > 0) v = Math.min(v, D[i - w - 1] + D2);
+                if (x < w - 1) v = Math.min(v, D[i - w + 1] + D2);
+            }
+            D[i] = v;
+        }
+    }
+    // backward pass
+    for (y = h - 1; y >= 0; y--) {
+        for (x = w - 1; x >= 0; x--) {
+            i = y * w + x;
+            var v2 = D[i];
+            if (x < w - 1) v2 = Math.min(v2, D[i + 1] + 1);
+            if (y < h - 1) {
+                v2 = Math.min(v2, D[i + w] + 1);
+                if (x < w - 1) v2 = Math.min(v2, D[i + w + 1] + D2);
+                if (x > 0) v2 = Math.min(v2, D[i + w - 1] + D2);
+            }
+            D[i] = v2;
+        }
+    }
+    return D;
+}
+
+/** Smooth TRIMMED alignment score in [0,1]: bilinear-sampled chamfer
+ *  distance with a cut-off kernel. Points farther than D_CUT px from any
+ *  layout edge get weight exactly 0 — photo content that does not exist in
+ *  the layout (2D-material flakes, contamination, bubbles) is excluded from
+ *  the fit instead of biasing it. meanDist is over INLIERS only, and
+ *  inlierFrac says how much of the photo the layout actually explains. */
+var CHAMFER_D_CUT = 3.0;
+var CHAMFER_SIGMA = 0.7; // px — peaked kernel: exact matches score ~1,
+                         // accidental 2px-off hits score ~0.02
+
+/** pts is either [x0,y0,x1,y1,...] (coarse) or [x0,y0,b0, x1,y1,b1,...]
+ *  triples whose b = gradient-orientation bucket (refine). D is either a
+ *  single Float32 DT or an array of 4 (one per orientation bucket). */
+function scoreChamfer(D, w, h, pts, dx, dy, sigma) {
+    var oriented = Array.isArray(D);
+    var stride = oriented ? 3 : 2;
+    var n = pts.length / stride;
+    if (!n) return { score: 0, meanDist: 1e9, inlierFrac: 0 };
+    var sig = sigma || CHAMFER_SIGMA;
+    var cut = sig * 3;
+    var sum = 0, dsum = 0, inl = 0;
+    for (var i = 0; i < pts.length; i += stride) {
+        var fx = pts[i] + dx, fy = pts[i + 1] + dy;
+        var Dch = oriented ? D[pts[i + 2]] : D;
+        if (fx < 0 || fy < 0 || fx > w - 1 || fy > h - 1) continue; // off-canvas: excluded, not penalized
+        var x0 = fx | 0, y0 = fy | 0;
+        var tx = fx - x0, ty = fy - y0;
+        var x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1);
+        var d00 = Dch[y0 * w + x0], d10 = Dch[y0 * w + x1];
+        var d01 = Dch[y1 * w + x0], d11 = Dch[y1 * w + x1];
+        var d = (d00 * (1 - tx) + d10 * tx) * (1 - ty) + (d01 * (1 - tx) + d11 * tx) * ty;
+        if (d < 1.0) { dsum += d; inl++; }
+        if (d < cut) {
+            var u = d / sig;
+            sum += Math.exp(-0.5 * u * u);
+        }
+    }
+    return { score: sum / n, meanDist: inl ? dsum / inl : 1e9, inlierFrac: inl / n };
+}
+
+/** 4 orientation-bucket distance transforms of the layout edge bitmap.
+ *  A match now requires position AND gradient direction — random organic
+ *  edges (flakes, contamination) rarely satisfy both. */
+function layoutOrientedDistMaps(L, w, h) {
+    var buckets = [new Uint8Array(w * h), new Uint8Array(w * h),
+                   new Uint8Array(w * h), new Uint8Array(w * h)];
+    var y, x, i;
+    for (y = 1; y < h - 1; y++) {
+        for (x = 1; x < w - 1; x++) {
+            i = y * w + x;
+            if (!L[i]) continue;
+            var gx = L[i + 1] - L[i - 1];
+            var gy = L[i + w] - L[i - w];
+            if (gx === 0 && gy === 0) { buckets[0][i] = 1; buckets[2][i] = 1; continue; } // line end / isolated
+            var ang = Math.atan2(gy, gx);           // -pi..pi, gradient direction
+            var sector = Math.round(ang / (Math.PI / 4)); // -4..4 in 45-deg units
+            var b = ((sector % 4) + 4) % 4;
+            buckets[b][i] = 1;
+        }
+    }
+    return buckets.map(function (B) { return layoutDistMap(B, w, h); });
+}
+
+function scoreAt(L, w, h, pts, dx, dy, sloppy) {
+    var hits = 0, n = pts.length / 2;
+    for (var i = 0; i < pts.length; i += 2) {
+        var x = pts[i] + dx, y = pts[i + 1] + dy;
+        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+        var idx = y * w + x;
+        if (L[idx]) { hits++; continue; }
+        if (sloppy && ((x > 0 && L[idx - 1]) || (x < w - 1 && L[idx + 1]) ||
+                       (y > 0 && L[idx - w]) || (y < h - 1 && L[idx + w]))) hits++;
+    }
+    return hits / Math.max(60, n);
+}
+
+function _sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+/** Fully automatic alignment: global multi-scale search of
+ *  (position, scale, rotation) maximizing Sobel-edge overlap with the layout. */
+async function autoAlignMicroImage() {
+    if (!microImg) return;
+    if (!allFeatures.length) return;
+    imgStatus('Aligning: extracting layout edges\u2026');
+    await _sleep(30);
+
+    // Region: layout bbox + margin (image may sit anywhere inside)
+    var rx = Infinity, ry = Infinity, RX = -Infinity, RY = -Infinity;
+    allFeatures.forEach(function (f) {
+        if (f.get('isDrawn')) return;
+        var e = f.getGeometry().getExtent();
+        rx = Math.min(rx, e[0]); ry = Math.min(ry, e[1]);
+        RX = Math.max(RX, e[2]); RY = Math.max(RY, e[3]);
+    });
+    var mx = (RX - rx) * 0.2 + 1, my = (RY - ry) * 0.2 + 1;
+    var region = [rx - mx, ry - my, RX + mx, RY + my];
+    var regionW = region[2] - region[0], regionH = region[3] - region[1];
+
+    // ---- scale prior from the marker grid ----
+    var pitchL = estimateLayoutPitch();
+    var pitchP = null;
+    var scales = null;
+    if (pitchL) {
+        pitchP = estimateImagePitch();
+        if (pitchP) {
+            var umPerPx0 = pitchL / pitchP;
+            scales = [0.8, 0.9, 1.0, 1.11, 1.25].map(function (m) { return umPerPx0 * m; });
+        }
+    }
+    if (!scales) {
+        // log-spaced coverage fallback: high-mag局部 shots to full-chip views
+        scales = [0.03, 0.045, 0.068, 0.10, 0.15, 0.23, 0.34, 0.51, 0.77, 1.15, 1.7, 2.55]
+            .map(function (c) { return c * regionW / imgWUm0; });
+    }
+
+    var img = microImg.img;
+    var imgWUm0 = img.naturalWidth;
+    var candidates = [];
+    for (var ci = 0; ci < scales.length; ci++) {
+        var umPerPx = scales[ci];
+        var fovW = imgWUm0 * umPerPx, fovH = img.naturalHeight * umPerPx;
+        var pxPerUm = 70 / fovW;
+        var canvasFits = regionW * pxPerUm <= 320;
+        if (canvasFits) {
+            var CW = Math.min(320, Math.max(96, Math.ceil(regionW * pxPerUm)));
+            var CH = Math.max(24, Math.round(CW * regionH / regionW));
+            pxPerUm = CW / regionW;
+            var Lc = layoutEdgeMap(region, CW, CH);
+            var Dc = layoutOrientedDistMaps(Lc, CW, CH);
+            var cx0 = (region[0] + region[2]) / 2, cy0 = (region[1] + region[3]) / 2;
+            var pts = imageEdgePoints(region, CW, CH, cx0, cy0, umPerPx, 0, 1600);
+            if (pts.length >= 40) {
+                var stepC = Math.max(2, Math.round(CW / 28));
+                var sigC = Math.max(1.5, stepC * 0.8);
+                var grid = [];
+                for (var dy = -CH; dy <= CH; dy += stepC) {
+                    for (var dx = -CW; dx <= CW; dx += stepC) {
+                        grid.push({ s: scoreChamfer(Dc, CW, CH, pts, dx, dy, sigC).score, dx: dx, dy: dy });
+                    }
+                }
+                grid.sort(function (a, b) { return b.s - a.s; });
+                var peaks = [];
+                var sep = stepC * 3;
+                for (var gi = 0; gi < grid.length && peaks.length < 6; gi++) {
+                    var g = grid[gi];
+                    var ok = true;
+                    for (var pj = 0; pj < peaks.length; pj++) {
+                        if (Math.abs(g.dx - peaks[pj].dx) < sep && Math.abs(g.dy - peaks[pj].dy) < sep) { ok = false; break; }
+                    }
+                    if (ok && g.s > grid[0].s * 0.25) peaks.push(g);
+                }
+                peaks.forEach(function (pk) {
+                    var narrow = scoreChamfer(Dc, CW, CH, pts, pk.dx, pk.dy, 1.0).score;
+                    candidates.push({
+                        score: narrow,
+                        cx: cx0 + pk.dx / pxPerUm,
+                        cy: cy0 - pk.dy / pxPerUm,
+                        umPerPx: umPerPx,
+                        rotDeg: 0
+                    });
+                });
+            }
+        } else {
+            // TILED search: the region cannot host a ~70px image inside the
+            // canvas cap. Slide a 2xFOV local window over the region at a
+            // stride of ~0.6 FOV and locate the image within each tile.
+            var TW = 240, TH = Math.max(24, Math.round(TW * fovH / fovW));
+            var strideUm = Math.max(fovW * 0.6, 50);
+            var nx = Math.ceil(regionW / strideUm), ny = Math.ceil(regionH / strideUm);
+            var tileCands = [];
+            for (var ty = 0; ty < ny; ty++) {
+                for (var tx = 0; tx < nx; tx++) {
+                    var tcx = region[0] + strideUm * (tx + 0.5);
+                    var tcy = region[1] + strideUm * (ty + 0.5);
+                    var tRegion = [tcx - fovW, tcy - fovH, tcx + fovW, tcy + fovH];
+                    var tPxPerUm = TW / (2 * fovW);
+                    var Lt = layoutEdgeMap(tRegion, TW, TH);
+                    var nEdge = 0;
+                    for (var le = 0; le < Lt.length; le++) nEdge += Lt[le];
+                    if (nEdge < 20) continue;
+                    var Dt = layoutOrientedDistMaps(Lt, TW, TH);
+                    var tpts = imageEdgePoints(tRegion, TW, TH, tcx, tcy, umPerPx, 0, 1200);
+                    if (tpts.length < 40) continue;
+                    var stepT = Math.max(2, Math.round(TW / 24));
+                    var sigT = Math.max(1.5, stepT * 0.8);
+                    var bestT = -1, btx = 0, bty = 0;
+                    for (var tdy = -TH; tdy <= TH; tdy += stepT) {
+                        for (var tdx = -TW; tdx <= TW; tdx += stepT) {
+                            var ts = scoreChamfer(Dt, TW, TH, tpts, tdx, tdy, sigT).score;
+                            if (ts > bestT) { bestT = ts; btx = tdx; bty = tdy; }
+                        }
+                    }
+                    tileCands.push({ s: bestT, cx: tcx + btx / tPxPerUm, cy: tcy - bty / tPxPerUm });
+                }
+            }
+            tileCands.sort(function (a, b) { return b.s - a.s; });
+            tileCands.slice(0, 4).forEach(function (tc) {
+                candidates.push({
+                    score: tc.s,
+                    cx: tc.cx, cy: tc.cy,
+                    umPerPx: umPerPx,
+                    rotDeg: 0
+                });
+            });
+        }
+        imgStatus('Aligning: scale hypothesis ' + (ci + 1) + '/' + scales.length + '...');
+        await _sleep(0);
+    }
+
+    if (!candidates.length) {
+        imgStatus(null);
+        reportTransform('auto-align failed: not enough image edges');
+        return;
+    }
+    // A larger FOV sits over denser layout area and scores higher by chance;
+    // on near-ties prefer the SMALLER FOV (finer scale).
+    candidates.sort(function (a, b) { return (b.rank ?? b.score) - (a.rank ?? a.score); });
+
+    // ---- refine pass: per-candidate local canvas at IMAGE resolution ----
+    // The refine canvas is sized to the candidate's own field of view (not the
+    // whole layout region) so a small-FOV image stays well sampled.
+    imgStatus('Aligning: refining\u2026');
+    await _sleep(30);
+var finals = [];
+    // Refine EVERY coarse candidate first: at refine resolution the metric
+    // separates the true basin from alien-edge basins by a wide margin, so
+    // ranking AFTER refinement is reliable (coarse scores alone are not).
+    for (var t = 0; t < candidates.length; t++) {
+        finals.push(refineCandidate(candidates[t], true));
+        if (t % 8 === 7) { imgStatus('Aligning: screening candidates ' + (t + 1) + '/' + candidates.length + '...'); await _sleep(0); }
+    }
+    finals.sort(function (a, b) { return b.score - a.score; });
+    var top = finals.slice(0, 3);
+
+    // Periodic grids (pad arrays, AREFs) create false optima at wrong scale —
+    // sweep a WIDE multiplicative scale range and rotations around the best
+    // survivors (true scale may be far from the coarse hypothesis).
+    var scaleSweepFull = [0.42, 0.48, 0.55, 0.63, 0.71, 0.79, 0.87, 0.93, 0.97, 1.0, 1.03, 1.07, 1.14, 1.24, 1.36, 1.5];
+    var scaleSweepTrim = [0.79, 0.87, 0.93, 0.97, 1.0, 1.03, 1.07, 1.14];
+    var rotSweep = [-8, -4, 0, 4, 8];
+    for (var t2 = 0; t2 < top.length; t2++) {
+        var base = top[t2];
+        var scaleSweep = t2 === 0 ? scaleSweepFull : scaleSweepTrim;
+        for (var si = 0; si < scaleSweep.length; si++) {
+            for (var ri = 0; ri < rotSweep.length; ri++) {
+                var cand2 = {
+                    score: 0,
+                    cx: base.cx, cy: base.cy,
+                    umPerPx: base.umPerPx * scaleSweep[si],
+                    rotDeg: base.rotDeg + rotSweep[ri]
+                };
+                var r2 = refineCandidate(cand2, true);
+                if (r2.score > base.score) { base = r2; top[t2] = r2; }
+            }
+        }
+        imgStatus('Aligning: candidate ' + (t2 + 1) + '/' + top.length + '...');
+        await _sleep(0);
+    }
+    finals = top;
+    finals.sort(function (a, b) { return b.score - a.score; });
+    var bestC = finals[0];
+    //
+    // final polish: two-tier hill-climb (coarse perturbations first, then
+    // sub-percent scale / sub-0.25-degree rotations) until convergence
+    var improved = true, hcIter = 0;
+    while (improved && hcIter < 9) {
+        improved = false;
+        hcIter++;
+        var perturbs = [];
+        var tier = hcIter <= 3
+            ? { sc: [0.985, 0.99, 0.995, 1.005, 1.01, 1.015], rt: [-0.5, -0.25, 0.25, 0.5] }
+            : { sc: [0.9975, 0.9988, 1.0012, 1.0025], rt: [-0.125, -0.0625, 0.0625, 0.125] };
+        tier.sc.forEach(function (fsc) {
+            perturbs.push({ score: 0, cx: bestC.cx, cy: bestC.cy,
+                umPerPx: bestC.umPerPx * fsc, rotDeg: bestC.rotDeg });
+        });
+        tier.rt.forEach(function (frt) {
+            perturbs.push({ score: 0, cx: bestC.cx, cy: bestC.cy,
+                umPerPx: bestC.umPerPx, rotDeg: bestC.rotDeg + frt });
+        });
+        for (var pb = 0; pb < perturbs.length; pb++) {
+            var r3 = refineCandidate(perturbs[pb]);
+            if (r3.score > bestC.score * 1.002) { bestC = r3; improved = true; }
+        }
+        imgStatus('Aligning: hill-climb pass ' + hcIter + '...');
+        await _sleep(0);
+    }
+
+    microImg.cx = bestC.cx;
+    microImg.cy = bestC.cy;
+    microImg.umPerPx = bestC.umPerPx;
+    microImg.rotDeg = bestC.rotDeg;
+    renderMicroLayer();
+    imgStatus(null);
+    if (vscode) {
+        vscode.postMessage({
+            type: 'imageAligned',
+            fileName: microImg.name,
+            cx: round2(bestC.cx), cy: round2(bestC.cy),
+            umPerPx: round4(bestC.umPerPx), rotDeg: round2(bestC.rotDeg),
+            edgeMatch: round4(bestC.score),
+            meanEdgeDistUm: bestC.meanDistUm < 1e8 ? round4(bestC.meanDistUm) : null,
+            inlierFrac: round4(bestC.inlierFrac || 0),
+            imageSizePx: [img.naturalWidth, img.naturalHeight],
+            fieldOfViewUm: [round2(img.naturalWidth * bestC.umPerPx), round2(img.naturalHeight * bestC.umPerPx)]
+        });
+    }
+}
+
+/** Local translation refinement around a candidate, using SMOOTH chamfer
+ *  scoring so sub-percent scale errors keep a gradient to follow.
+ *
+ *  "Layout is the reference": image edge points that land far from any layout
+ *  edge (2D-material flakes, contamination — present in the photo but not in
+ *  the GDS) simply saturate to ~0 and cannot bias the pose; the reverse term
+ *  requires layout edges inside the image footprint to be covered by image
+ *  edges, so the photo cannot "hide" from large parts of the reference. */
+function refineCandidate(cand, fast) {
+    var img = microImg.img;
+    var best = { score: -1, cx: cand.cx, cy: cand.cy, umPerPx: cand.umPerPx, rotDeg: cand.rotDeg, meanDistPx: 1e9 };
+    var fovW = img.naturalWidth * cand.umPerPx;
+    var fovH = img.naturalHeight * cand.umPerPx;
+    var Rx = fovW * 0.85 + 5, Ry = fovH * 0.85 + 5;
+    var region = [cand.cx - Rx, cand.cy - Ry, cand.cx + Rx, cand.cy + Ry];
+    var FW = 384;
+    var FH = Math.max(48, Math.round(FW * (region[3] - region[1]) / (region[2] - region[0])));
+    var L = layoutEdgeMap(region, FW, FH);
+    var D = layoutOrientedDistMaps(L, FW, FH);
+    var steps = fast ? [Math.round(FW / 24), Math.round(FW / 96), 1]
+                     : [Math.round(FW / 24), Math.round(FW / 96), 2, 1, 0.5];
+    var pxPerUm = FW / (region[2] - region[0]);
+    // edge extraction depends only on (scale, rotation) — translation is
+    // applied inside the grid search, so ONE extraction serves all levels
+    var pts = imageEdgePoints(region, FW, FH, cand.cx, cand.cy, cand.umPerPx, cand.rotDeg, 6000);
+    if (pts.length < 90) return best; // tiny-FOV degenerate candidates have too few edges to trust
+    // grid search over ABSOLUTE pixel offsets from the extraction pose
+    var offX = 0, offY = 0;
+    for (var st = 0; st < steps.length; st++) {
+        var step = steps[st];
+        var range = step * 5;
+        var sigL = Math.max(0.7, step * 0.8);  // shrink kernel with the grid
+        var local = { score: -1, bx: offX, by: offY, md: 1e9, inl: 0 };
+        for (var dy = -range; dy <= range; dy += step) {
+            for (var dx = -range; dx <= range; dx += step) {
+                var ax = offX + dx, ay = offY + dy;
+                var fwd = scoreChamfer(D, FW, FH, pts, ax, ay, sigL);
+                var sc = fwd.score;
+                if (sc > local.score) { local.score = sc; local.bx = ax; local.by = ay; local.md = fwd.meanDist; local.inl = fwd.inlierFrac; }
+            }
+        }
+        offX = local.bx; offY = local.by;
+        best.score = local.score;
+        best.meanDistPx = local.md;
+        best.inlierFrac = local.inl;
+    }
+    best.cx = cand.cx + offX / pxPerUm;
+    best.cy = cand.cy - offY / pxPerUm;
+    best.meanDistUm = best.meanDistPx / pxPerUm;
+    return best;
+}
+
+// ============================================================
+// Keep OpenLayers canvas sized to its container
+// ============================================================
+var _pendingFit = false;
+new ResizeObserver(function() {
+    var prevSize = map.getSize();
+    map.updateSize();
+    var newSize = map.getSize();
+    // If map went from zero/near-zero to a real size, fit the view to data
+    var wasTiny = !prevSize || prevSize[0] < 10 || prevSize[1] < 10;
+    var nowBig = newSize && newSize[0] >= 10 && newSize[1] >= 10;
+    if ((wasTiny && nowBig) || _pendingFit) {
+        _pendingFit = false;
+        if (allFeatures.length > 0) {
+            fitView();
+        }
+    }
+}).observe(document.getElementById('map'));
+
+// ============================================================
+// Event bindings — attached via addEventListener, because the
+// webview CSP blocks inline `onclick` attributes (VS Code).
+// ============================================================
+(function bindToolbar() {
+    var $ = function (sel) { return document.querySelector(sel); };
+    var on = function (el, fn) { if (el) el.addEventListener('click', function (e) { fn(e); }); };
+
+    on($('#run-btn'), rebuildScript);
+    on($('#zoom-in-btn'), zoomIn);
+    on($('#zoom-out-btn'), zoomOut);
+    on($('#fit-btn'), fitView);
+    on($('#copy-btn'), copyYAML);
+
+    document.querySelectorAll('.tool-btn[data-mode]').forEach(function (btn) {
+        on(btn, function () {
+            var mode = btn.dataset.mode;
+            if (mode === 'snap') { toggleSnap(); return; }
+            if (mode === 'delete') { deleteDrawn(); return; }
+            setMode(mode);
+        });
+    });
+
+    on($('#img-insert-btn'), function () {
+        vscode && vscode.postMessage({ type: 'insertImage' });
+    });
+    on($('#img-move-btn'), function () {
+        if (!microImg) return;
+        imgMoveMode = !imgMoveMode;
+        $('#img-move-btn').classList.toggle('active', imgMoveMode);
+        if (imgMoveMode) setMode('select');
+    });
+    on($('#img-align-btn'), function () {
+        if (!microImg) return;
+        autoAlignMicroImage();
+    });
+
+})();
+
+// ============================================================
+// Signal ready to extension
+// ============================================================
+vscode && vscode.postMessage({ type: 'webviewReady' });
+</script>
+</body>
+</html>
