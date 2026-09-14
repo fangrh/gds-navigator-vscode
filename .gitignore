@@ -8,10 +8,10 @@ media/ol.css
 # local python venv for provenance testing (create with scripts/setup-venv.ps1)
 .venv-fork/
 
-# large test fixtures (chip layouts / microscope photos) stay local:
-#   test/fixtures/*.json *.png — regenerate from your own GDS/photos
-test/fixtures/*.json
-test/fixtures/*.png
+# additional large local fixtures stay out of git; the curated demo pair
+# (chip285_markers_geo.json + nbse2_sample1-1_micro.jpg) IS committed.
+test/fixtures/*.gds
 test/fixtures/*.tif
+test/fixtures/*.png
 webview/test-standalone.html
 scripts/_viewer_check.js
