@@ -14,7 +14,7 @@ the provenance navigation, the script runner and the image-registration tool.
   Navigator (OpenLayers canvas, pan/zoom, layer legend with per-layer
   visibility, click / ctrl-click / drag-box selection).
 - **Draw tools** (rectangle/circle/line/polygon + snap) for quick measuring;
-  drawn shapes are ephemeral.
+  drawings and their instructions are saved per GDS in the current workspace.
 
 ### Provenance-aware source navigation
 - **Automatic sidecar detection** — `chip.provenance.json` (written by the
@@ -40,39 +40,93 @@ the provenance navigation, the script runner and the image-registration tool.
   auto-refreshes the viewer. The **no-sidecar flow**: open a GDS without
   provenance → click the *Provenance: OFF* indicator → appoint a `.py` →
   it is executed and the sidecar is generated.
-- **Environment picker** — `GDS: Select Python Environment` lists conda envs;
-  or set `gdsNavigator.pythonPath` (e.g. an isolated venv with the fork
-  installed).
+- Builds detect only new or modified GDS outputs, report no output, and offer a choice for multiple outputs. Cancel a running build from its VS Code notification. Environment diagnostics include module origins and fork revision/dirty status.
+- **Python environment** — automatically prefers the installed provenance-enabled
+  fork. Click the status bar or use `GDS: Select Python Environment` for a manual
+  choice or to return to Automatic.
 
 ### AI-agent handoff
 - **Copy Selection as YAML** (toolbar icon or `Ctrl+Shift+C`) puts a
-  machine-readable summary on the clipboard:
+  a versioned, valid YAML document on the clipboard. Both copy paths use the same serializer; success is shown only after clipboard verification:
   ```yaml
-  mzi_example.py Component 1: Line 8, bbox:[5.5000, -1.1250, 15.5000, -0.1250]
-    loop_index: (2,3)  # zero-based, outermost first
-    call_chain:
-      - @D:/proj/scripts/mzi_example.py#8 (<module>)
+  schema: "gds-navigator.selection"
+  version: 1
+  document:
+    path: "D:/project/chip.gds"
+    sha256: "<input hash>"
+    units: "um"
+    coordinates: "Cartesian x-right y-up"
+  scope: "selected_instances"
+  elements: []
+  annotations: []
   ```
+- Elements include stable snapshot IDs, full geometry, provenance, and nested
+  array indices. Missing provenance is explicitly marked; a source reference
+  is not claimed to prove that the current Python still generated the GDS.
+- Choose a drawing intent (**Add / Move / Resize / Delete / Mark region**) and
+  optional instruction. New drawings link to the currently selected instances.
+  **Apply to drawings** updates selected drawings using the selected GDS targets.
+  Copy the drawing together with elements to send your instruction to an agent.
+- Vertex edits and translations update the copied geometry without display
+  rounding. Drawings survive rebuilds and restarts; changed snapshots flag their
+  target references for review. Instructions are data and are never executed.
+
 
 ### Microscope image overlay + automatic alignment
 - **Insert** a PNG/JPG photo of the fabricated chip (toolbar icon or
-  `GDS: Insert Microscope Image`) — it overlays the layout at 55% opacity.
+  `GDS: Insert Microscope Image`) — it sits beneath the GDS elements at 100%
+  opacity. BMP/WebP are also supported. Images are limited to 16 megapixels.
 - **Fully automatic alignment** (crosshair button): the photo is registered
-  against the layout with no manual pre-positioning:
-  - Sobel edges with true non-maximum suppression on the photo; rasterized
-    layout edges as reference.
-  - **The layout is the reference**: photo content that does not exist in the
-    GDS (2D-material flakes, contamination, bubbles) gets zero weight — a
-    trimmed chamfer kernel plus gradient-orientation matching keeps foreign
-    structures from biasing the fit.
-  - Global multi-scale search → per-candidate refinement → scale/rotation
-    sweep → hill-climb polish. A marker-pitch prior (autocorrelation) locks
-    scale directly for periodic marker grids; small-FOV photos use a tiled
-    translation search.
-  - Result (position, µm/px, rotation, edge-match %, inlier fraction) is
-    written to the output channel.
-- **Manual fine-tuning**: image-move tool — drag, `Shift+wheel` scale,
-  `R`/`T` rotate ±1°/±5°, arrows nudge 1/10 µm, `O`/`P` opacity.
+  using **numbered yellow square markers only**, with no manual anchors.
+  The shared browser/script solver matches complete vector label patterns
+  (including negative signs) from layers 1/0, 8/0 and 9/0. Electrode layer
+  4/0 and other image content do not participate in fitting or refinement.
+  At least three consistent markers are required. Four markers can support
+  perspective correction, checked against held-out marker-boundary pixels.
+  Ambiguous labels or boundary RMS above 2 px (4 px per marker) fail without
+  changing the image placement; there is no whole-image fallback.
+  The output channel reports correspondences, boundary RMS and the native
+  image-pixel-to-GDS-micrometre matrix. Electrode outlines remain visible,
+  even when they disagree with the marker-determined placement.
+- Alignment runs in a cancellable worker, keeping the viewer responsive. Cancellation and failed fits preserve placement.
+- **Image controls** show marker count and boundary RMS, with Align, Fit image,
+  Reset edits, Remove, visibility and opacity controls. Position is locked by
+  default and after successful alignment. Unlock before using the image-move
+  tool: drag, `Shift+wheel` scale, `R`/`T` rotate, arrows nudge, `O`/`P` opacity.
+  Manual moves are labelled **Manually adjusted** until reset or re-alignment;
+  the old RMS is not presented as current evidence after an edit.
+- **Saved placement** is automatic in this VS Code workspace. Reopening the
+  GDS restores the image, transform, display settings and marker options only
+  when SHA-256 hashes of both source files still match. Changed or missing
+  inputs invalidate the saved placement. Remove clears it. Image bytes are
+  not stored in workspace state, and source files are not modified.
+- **Marker appearance** can be Yellow (default), Bright or Dark. The latter
+  presets support light/dark numbered markers on contrasting gray backgrounds;
+  they are not general OCR. Marker layers are configurable as `1/0,8/0,9/0`;
+  electrode layer `4/0` is always excluded. Changing settings requires a new
+  alignment. Whole vector label patterns determine identity; readable text
+  reporting currently covers the verified 0/1/signed labels in this GDS font.
+- **Rendering** caches the warped image; opacity/visibility edits reuse it.
+- **Tests**: `npm test` includes known-pose, marker-mode, malformed-input,
+  saved-state and persistence-protocol checks (Edge/Chrome required).
+  `npm run test:alignment:viewer -- --image C:/path/to/newest.png` checks the
+  actual viewer, controls, restore, stacking and failed-alignment preservation.
+  The older `test/alignment/run-tests.js` is the legacy general-edge benchmark;
+  its grayscale/hierarchical fixtures are outside the numbered-yellow-marker contract.
+
+Run the same solver without opening VS Code (Python with `klayout` required):
+
+```powershell
+node test/alignment/align-markers-direct.js --gds test/fixtures/jj_pad_center_100_test.gds --image C:/path/to/newest.png --out logs/numbered-markers/latest
+```
+
+Optional script flags: `--marker-appearance bright` (or `yellow`/`dark`),
+`--marker-layers 1/0,8/0,9/0`, and `--python PATH`. The script and viewer use
+the same solver and acceptance limits.
+
+This writes `result.json` (input paths and SHA256 hashes, row-major 3×3 transform,
+correspondences and residuals), `diagnostic.png`, and `overlay.png`. Failure
+returns a nonzero exit code and retains diagnostics. The source files are unchanged.
 
 ## Requirements
 
@@ -81,13 +135,43 @@ the provenance navigation, the script runner and the image-registration tool.
 | Viewing / zooming any `.gds` | Python env with [`klayout`](https://pypi.org/project/klayout/) (`pip install klayout`) |
 | Provenance generation (sidecars, jump-to-source) | The [fangrh/gdsfactory](https://github.com/fangrh/gdsfactory) fork |
 
-Pick the environment once with `GDS: Select Python Environment` or set
-`gdsNavigator.pythonPath`.
+Python selection is automatic by default: the extension checks installed environments
+and prefers one with the provenance-enabled gdsfactory fork and KLayout. It does not
+install packages or modify your fork. Builds, parsing and component previews wait for
+selection to finish.
+
+Click the Python status-bar item or run `GDS: Select Python Environment` to choose an
+interpreter manually. Your choice takes priority; choose **Automatic** to return to
+detection. You can also explicitly set `gdsNavigator.pythonPath`.
+Selecting the fork does not add source information to an existing plain GDS: rebuild
+its generating script with provenance enabled to create the sidecar.
+If no provenance environment is found, a verified KLayout environment can still
+open layouts; the status bar says **KLayout only**. Discovery is bounded to 30 seconds
+and 24 candidates. Environments in unusual locations can be selected manually.
 
 ## Usage
 
+On the first GDS open in a folder, **Set up GDS Python** offers a checked environment.
+Choose **Use this environment** or **Choose another**; the selected interpreter is
+verified before it becomes this folder's default. Existing environments are reused;
+setup does not install packages. **Not now** leaves the folder unchanged.
+Run **GDS: Set Up Project Environment** to repeat setup or change the saved default.
+
+Setup writes `.gds-navigator/environment.json`, a `gds-python.cmd` launcher, and a
+managed section in `AGENTS.md` linking to the environment guide. Existing agent
+instructions and custom launchers are preserved. On Windows, agents can run
+`.\gds-python.cmd your_script.py`; it uses the selected interpreter and enables
+`GDS_PROVENANCE=1`. Copied selections and newly created work orders also carry the
+exact runtime invocation. Other agents must follow this project entry point; their
+own unrelated shell interpreters are not globally changed. Interpreter paths are
+machine-local: select a checked environment again after moving to another computer.
+
+Provenance requires tracked gdsfactory construction and writing. An unrelated
+sidecar beside a plain GDS no longer makes the viewer claim **Provenance: ON**;
+the viewer checks source-reference coverage and reports incomplete tracking.
+
 1. `File > Open Folder` on your layout project.
-2. `GDS: Select Python Environment` → the env with klayout/gdsfactory.
+2. Check the Python status-bar item; click it if you want to select an environment manually.
 3. Double-click a `.gds` file — pan/zoom, toggle layers, click shapes.
 4. ▶ re-runs the generating script and refreshes the view.
 5. Select shapes → `Ctrl+Shift+C` for AI-ready YAML.
@@ -127,3 +211,131 @@ Based on [fangrh/overages](https://github.com/fangrh/overages)
 (superGDS Studio), itself inspired by Overleaf. Rendering by
 [OpenLayers](https://openlayers.org/), GDS reading by
 [KLayout](https://www.klayout.de/).
+
+## Reliability checks
+
+### Multiple microscope images
+
+Insert one or several photos into a GDS. Use the **Image** selector to choose
+which photo to edit, **Opacity** and **Show** for transparency/visibility, and
+**Raise / Lower** to order photos. All photos remain below GDS elements.
+
+New images use **Fit global**: preserve aspect ratio and place the photo inside
+the full GDS bounds. Choose **Fit current view**, then **Place image**, to place
+the photo inside the current GDS window without moving the viewport. These are
+manual placements; **Align** registers numbered markers. **Show image** only
+zooms the viewport to the selected photo.
+
+Images, their order/settings/placements and drawn elements restore when the GDS
+is reopened in the same workspace. Keep original image files available. Changed
+GDS content preserves placement but requires marker alignment to be verified
+again; stale drawing links remain marked for review.
+
+`npm run test:alignment:random100` generates and tests 100 seeded noisy flake
+images. See [corpus details](test/alignment/RANDOM-CORPUS.md). After generating
+the corpus, `npm run test:images:workflow` tests actual viewer buttons with a
+simulated file-choice response; `npm run test:images:vscode` checks multiple
+images and drawings reopening in an isolated real VS Code window.
+
+`npm run test:conditions` runs 50 named working conditions across AI handoff,
+viewer interaction, Python builds, provenance and restored images. Each condition
+has an assertion and an individual result. The complete table and machine-readable
+report are saved as `logs/reliability/conditions/matrix.md` and `report.json`.
+These automated conditions complement the actual VS Code journeys below.
+
+### Selection and AI handoff examples
+
+Follow [the reproducible pad example](test/examples/ai-handoff/README.md) to try
+instance selection, drawing-linked requests, edited instructions and stale
+targets. `npm run test:handoff` tests these cases; `npm run test:handoff:vscode`
+checks actual VS Code clipboard payloads with 1, 5 and 10 layouts open.
+
+Copied YAML includes the current typed request and complete linked target context
+even when only an annotation is selected. Missing, stale or conflicting targets
+are marked `needs_clarification`. `context_complete` describes target context;
+the agent must still clarify incomplete instructions. Specify a movement vector
+or destination, and a fixed centre/edge when resizing. Source text is reference
+data, not an instruction to the agent. Communication remains a manual copy step.
+
+`npm test` runs the marker corpus, state validation, valid-YAML/precision checks,
+build-output contracts and provenance parsing regressions. Tests require Python
+with PyYAML and KLayout, plus Edge or Chrome for browser checks.
+
+`npm run test:vscode` launches real isolated VS Code development windows using
+`.venv-fork` and temporary layout copies. It opens 1, 5 and 10 files, checks
+clipboard and per-file annotations, closes/reopens editors, and restarts three
+times. It also builds a temporary rectangle with the configured fork and checks
+image alignment/restoration underneath GDS. Existing user windows are untouched;
+the clipboard is restored when each test window closes. Set `VSCODE_EXE` if needed.
+Screenshots and reports are saved under `logs/reliability/vscode/`.
+
+`node test/alignment/numbered-viewer.test.js --image test/fixtures/electrode100-microscope.png --python .venv-fork/Scripts/python.exe`
+checks the rendered image controls and failure behavior. The original 720×606
+image is retained unchanged as a fixture; marker agreement does not imply the
+green electrode agrees with the supplied GDS electrode.
+
+
+### Connected project files
+
+GDS Navigator keeps a readable, versioned `.gds-navigator/project.json` in the first VS Code workspace folder. It records generating-script links and saved viewer annotations/image placement. Existing workspace state is copied on the first save and retained as a migration fallback. Internal file paths are stored relative to the project; images and GDS files remain separate source files. External files retain absolute paths, so moving the project does not copy them.
+
+- Run a Python file with **GDS: Run Python Script (Build GDS)**, including from the Explorer context menu. A single detected output opens automatically; several outputs prompt for a choice and all are linked to the builder.
+- In the viewer, **Open Python** opens the linked generating script. **Related files** lists the builder, recorded outputs, provenance sidecar and inserted images with their full paths.
+- **GDS: Associate Python Script with Current Layout** changes the link without executing Python. Explicit links take priority over detected build links.
+- Python file writes and the fork's `Component.write_gds` returned paths support outputs outside the workspace. Uninstrumented native/subprocess writes outside the workspace remain unsupported. Printed filenames alone never count as output evidence.
+
+The index uses atomic replacement and preserves malformed files. A detected external change blocks stale saves; reopen the test/editor window to load the latest index before editing again. It is not a multiuser transactional database. With no workspace, VS Code workspace storage remains the fallback. Multiple workspace roots currently share the index in the first root. File/folder moves outside VS Code are not automatically relinked; missing files remain visible as missing.
+
+Engineering references: [KiCad project manager](https://docs.kicad.org/10.0/en/kicad/kicad.html), [VS Code workspace storage](https://code.visualstudio.com/api/extension-capabilities/common-capabilities), and [SQLite application-file guidance](https://www.sqlite.org/whentouse.html). A small portable index fits the current workload; database migration should follow measured scale or concurrent-write requirements.
+
+Validation: `npm run test:files` checks links, migration, output detection and failure handling. `npm run compile && node test/reliability/vscode-lifecycle.test.js --file-links` exercises actual VS Code controls, external output linking and three reopen cycles with 1/5/10 files. Screenshots and reports are under `logs/reliability/file-links-vscode/`.
+
+
+### Image layers and contour display
+
+The image panel lists layers from top to bottom. Select an image to change its opacity, use its checkbox to show/hide it, and use **Raise**/**Lower** to reorder images. GDS elements remain above every image layer.
+
+Each image supports **Original image**, **Contours only**, and **Image + contours**. Adjust the edge threshold (higher hides weaker edges), line color and width; **Image border** adds an outline around the transformed image. These are visual edge displays, not validated flake segmentation. They do not change numbered-marker alignment or modify the source image. Display settings, visibility, opacity and order are saved with the project and restored when reopening the GDS.
+
+
+### Insert component proposals for an AI agent
+
+Open **Shapes ▾** in the top navigation or the **Shapes icon at the top of the right toolbar**. The shared list includes rectangle, circle, line, polygon, linear taper, straight section and rectangular pad. Choose a component to enter its dimensions. Set length/widths in micrometres, layer/datatype and counterclockwise rotation. **Place on canvas** uses the clicked point as the input-edge midpoint; **Input at view center** puts that same anchor in the middle of the viewport. The shape is selected automatically with the **Add** instruction, ready for Copy (Ctrl+Shift+C). Add your intended operation in the instruction box if needed.
+
+These persistent drawings are proposals, not edits to the source GDS. The copied YAML contains the component kind, parameters, anchor convention, exact current polygon, numeric layer tuple and `Component.add_polygon` construction recipe, plus the linked generating Python script when available. An agent can reconstruct the proposed geometry from this data; the plugin does not send it to an agent or execute the change automatically.
+
+Translation exports corrected parameters. After arbitrary vertex edits, geometry and the polygon recipe remain authoritative; original parameters are explicitly historical. Unsupported polygon topology is flagged for review. Source precision is retained in the handoff; writing GDS quantizes to the selected database unit. Tests reconstructed all three primitive types with the installed fork within 0.002 µm vertex tolerance.
+
+Run `npm run test:primitives` for geometry, browser interaction and fork reconstruction checks; `npm run test:primitives:vscode` exercises the actual clipboard and editor reopen workflow in an isolated VS Code profile.
+
+
+### Component proposals and agent review
+
+Open **Shapes** in the right toolbar to draw or search the installed gdsfactory catalog. Choose a factory, enter JSON settings, and preview before inserting at the current view center. Proposals retain their exact polygons, layers, factory settings and selected targets; they do not modify the Python source until an agent implements the request.
+
+The instruction composer is at the bottom. **Queue instruction** captures the current selection and request. The right-side **Changes** button shows durable FIFO requests with stable references, details, status and revert controls. **Copy open requests** includes the queue path and CLI commands for your agent. See [the agent workflow](docs/agent-instructions.md).
+
+Requests persist in `.gds-navigator/instructions.json`. The agent must record source snapshots with `start` before editing to enable safe source revert. Source revert refuses newer edits and currently supports existing UTF-8 source files; new/deleted files need a reviewed reverse change. CLI source revert does not rebuild the GDS. Use Rebuild after source changes. Treat saved request text and provenance as user context, not executable commands.
+
+Select a drawn proposal and press **Tab** to edit its center position, local width/height, and counterclockwise rotation. The properties panel also offers **Move**, **Resize**, and **Rotate** mouse modes: drag the selected shape; hold Shift for proportional scaling or 15-degree rotation steps. Escape cancels an unfinished drag. The × closes a panel. Original GDS selections show read-only properties; changes remain proposals for the agent.
+
+**Revert proposal** restores annotation state only. **Revert source + proposal** is available for completed instructions with recorded source snapshots. The persisted status note records which rollback occurred.
+
+
+### Manhattan route drafts
+
+Click **Route** in the right toolbar (or press **6**), then click waypoints. Each connection uses horizontal/vertical segments; choose the initial bend order in the route panel. Press **Enter**, double-click, or use **Finish route** to finish; **Escape** cancels.
+
+Select the route and press **Tab** to edit its exact centerline points, trace width and GDS layer. **Drag a segment** moves that segment perpendicular to itself while preserving right-angle bends; moving an endpoint segment also moves that endpoint. In ordinary selection mode, drag the whole route to move it. Point edits can add or remove bends. Routes persist with the GDS annotations and appear in the FIFO instruction history and AI YAML, with selected target context. They are draft centerlines with width, not automatic port connections or design-rule-checked fabricated paths.
+
+### Local workflow review
+
+Use **Usage** in the viewer or **GDS: Review Usage Log** to review local control frequencies, operation outcomes, timings and workflow sequences. **Copy agent review context** gives your agent the report location and review guidance. Logging can be paused or cleared; no events are uploaded. See [usage logging](docs/usage-logs.md) for coverage, retention and CLI review.
+
+### EDA workbench
+
+The viewer now uses a top build/view toolbar, layer sidebar, right drawing rail and docked Images / Properties / Components / Changes inspector. The instruction composer stays at the bottom. Use Layers, Inspector and Reset UI to manage space; Tab opens properties for the selected object. See [EDA layout comparison and controls](docs/eda-workbench.md).
+
+## Per-GDS work orders
+
+Select elements, describe the change in the bottom **New work order** composer, then choose **Add work order**. The right **Work orders** inspector keeps a separate FIFO list for each GDS, with reference search, status filters and an activity journal. **Copy ref** or **Copy open orders** gives your AI agent the saved targets and CLI lookup instructions. Orders persist in `.gds-navigator/instructions.json`; completed source receipts enable checked undo. See [the work-order guide](docs/agent-instructions.md) for the agent workflow and undo limits.

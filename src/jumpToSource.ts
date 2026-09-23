@@ -9,25 +9,30 @@ const highlightType = vscode.window.createTextEditorDecorationType({
 
 /**
  * Open the provenance-referenced source file at the given line, next to the
- * GDS viewer, with a temporary highlight. Absolute paths recorded in the
- * provenance win; otherwise the file is located by basename in the workspace
- * (provenance recorded on another machine only stores its own paths).
+ * GDS viewer, with a temporary highlight. An existing exact path wins. When
+ * provenance points at a moved file, every fallback is explicitly confirmed.
  */
 export async function openSource(rawFile: string, rawLine: number, gdsPath?: string): Promise<void> {
-    const line = Math.max(1, parseInt(String(rawLine), 10) || 1);
+    const parsedLine = Number(rawLine);
+    const line = Number.isInteger(parsedLine) && parsedLine > 0 ? parsedLine : 0;
     const file = (rawFile || '').replace(/\\/g, '/');
 
     const candidates: string[] = [];
-    if (path.isAbsolute(file) && fs.existsSync(file)) {
-        candidates.push(file);
-    }
     const basename = path.basename(file);
-    if (gdsPath) {
-        const nextToGds = path.join(path.dirname(gdsPath), basename);
-        if (fs.existsSync(nextToGds)) {
-            candidates.push(nextToGds);
-        }
+    const isSourceFile = (candidate: string): boolean => /\.(py|pyw|js|jsx|ts|tsx|mjs|cjs)$/i.test(candidate);
+    if (!isSourceFile(file)) {
+        await vscode.window.showErrorMessage(`GDS Navigator: unsupported provenance source file type: ${file || '(empty)'}.`);
+        return;
     }
+    // Exact absolute and relative paths are authoritative when they exist.
+    const exact = path.isAbsolute(file) ? path.normalize(file) : path.resolve(file);
+    if (fs.existsSync(exact) && fs.statSync(exact).isFile()) candidates.push(exact);
+    if (candidates.length === 0 && gdsPath && !path.isAbsolute(file)) {
+        const relativeToGds = path.resolve(path.dirname(gdsPath), file);
+        if (fs.existsSync(relativeToGds) && fs.statSync(relativeToGds).isFile()) candidates.push(relativeToGds);
+    }
+    // Relocation search is intentionally never implicit: even one candidate is
+    // shown to the user and labelled as unverified.
     if (candidates.length === 0 && basename && vscode.workspace.workspaceFolders) {
         try {
             const uris = await vscode.workspace.findFiles(`**/${basename}`, '**/node_modules/**', 5);
@@ -53,9 +58,27 @@ export async function openSource(rawFile: string, rawLine: number, gdsPath?: str
         );
         return;
     }
+    if (!line) {
+        await vscode.window.showErrorMessage(`GDS Navigator: invalid provenance line for ${file || basename || 'source file'}.`);
+        return;
+    }
 
-    const doc = await vscode.workspace.openTextDocument(candidates[0]);
-    const lineIdx = Math.min(line - 1, Math.max(0, doc.lineCount - 1));
+    const uniqueCandidates = [...new Set(candidates.map((candidate) => path.normalize(candidate)))];
+    let selected = uniqueCandidates[0];
+    const exactWasFound = uniqueCandidates.length === 1 && path.normalize(uniqueCandidates[0]) === path.normalize(exact);
+    if (!exactWasFound) {
+        const choice = await vscode.window.showQuickPick(uniqueCandidates.map((candidate) => ({ label: `Relocated (unverified): ${path.basename(candidate)}`, description: candidate, candidate })), {
+            placeHolder: `Choose provenance source for ${basename}`,
+        });
+        if (!choice) return;
+        selected = choice.candidate;
+    }
+    const doc = await vscode.workspace.openTextDocument(selected);
+    if (line > doc.lineCount) {
+        await vscode.window.showErrorMessage(`GDS Navigator: provenance line ${line} is unavailable in ${selected} (file has ${doc.lineCount} lines).`);
+        return;
+    }
+    const lineIdx = line - 1;
     const editor = await vscode.window.showTextDocument(doc, {
         viewColumn: vscode.ViewColumn.Beside,
         selection: new vscode.Range(lineIdx, 0, lineIdx, 0),

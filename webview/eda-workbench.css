@@ -1,0 +1,250 @@
+/* Compact EDA workbench skin.  The document structure is owned by viewer.html;
+   this file only supplies layout and visual overrides. */
+:root {
+  --eda-bg: var(--vscode-editor-background, #1e1e1e);
+  --eda-panel: var(--vscode-sideBar-background, #252526);
+  --eda-panel-alt: var(--vscode-editorWidget-background, #2d2d30);
+  --eda-input: var(--vscode-input-background, #3c3c3c);
+  --eda-border: var(--vscode-panel-border, #454545);
+  --eda-border-strong: var(--vscode-focusBorder, #007acc);
+  --eda-fg: var(--vscode-foreground, #cccccc);
+  --eda-muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --eda-accent: var(--vscode-textLink-foreground, #3794ff);
+  --eda-selection: var(--vscode-list-activeSelectionBackground, #094771);
+  --eda-selection-fg: var(--vscode-list-activeSelectionForeground, #ffffff);
+  --eda-danger: var(--vscode-errorForeground, #f48771);
+  --eda-success: var(--vscode-testing-iconPassed, #73c991);
+  --eda-font: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  --eda-mono: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Consolas, monospace);
+}
+
+html, body { width: 100%; height: 100%; }
+body.eda-workbench {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--eda-bg);
+  color: var(--eda-fg);
+  font: 12px/1.35 var(--eda-font);
+}
+
+.eda-workbench *, .eda-workbench *::before, .eda-workbench *::after { box-sizing: border-box; }
+.eda-workbench [hidden] { display: none !important; }
+.eda-workbench button, .eda-workbench input, .eda-workbench select, .eda-workbench textarea { font: inherit; }
+.eda-workbench button { color: var(--eda-fg); background: var(--eda-input); border: 1px solid var(--eda-border); border-radius: 3px; cursor: pointer; }
+.eda-workbench button:hover:not(:disabled) { border-color: var(--eda-accent); background: color-mix(in srgb, var(--eda-input) 82%, var(--eda-accent)); }
+.eda-workbench button:disabled { opacity: .48; cursor: default; }
+.eda-workbench :is(button, input, select, textarea, [tabindex]):focus-visible { outline: 1px solid var(--eda-border-strong); outline-offset: 1px; }
+
+#eda-header {
+  display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 5px 9px;
+  flex: 0 0 auto; border-bottom: 1px solid var(--eda-border); background: var(--eda-panel);
+}
+#eda-document { min-width: 0; flex: 0 1 auto; max-width: 25%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+#eda-header nav, #eda-header > nav { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1 1 auto; flex-wrap: wrap; }
+#eda-header nav button, #eda-header button { min-height: 26px; padding: 3px 8px; white-space: nowrap; }
+#zoom-controls { position: static !important; z-index: auto !important; display: flex !important; flex-direction: row !important; align-items: center; gap: 3px; flex: 0 0 auto; }
+#zoom-controls .zoom-btn { width: 27px; height: 26px; padding: 3px; }
+#zoom-controls svg { width: 15px; height: 15px; }
+
+#eda-body { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
+#sidebar {
+  display: flex; flex-direction: column; flex: 0 0 170px; width: 170px; min-width: 0; min-height: 0;
+  padding: 8px; overflow: auto; background: var(--eda-panel); color: var(--eda-fg); border-right: 1px solid var(--eda-border);
+}
+body.layers-collapsed #sidebar { flex-basis: 0; width: 0; padding-left: 0; padding-right: 0; border-right: 0; overflow: hidden; }
+#sidebar h4 { color: var(--eda-fg); margin: 0 0 7px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+#sidebar button { width: 100%; margin: 0 0 5px; padding: 5px 7px; }
+.file-item, .legend-row { border-radius: 3px; }
+.file-item:hover, .legend-row:hover { background: var(--eda-panel-alt); }
+.file-item.active { background: var(--eda-selection); color: var(--eda-selection-fg); }
+.legend-row { padding: 3px 2px; }
+
+#map-container { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 180px; min-height: 0; overflow: hidden; background: var(--eda-bg); }
+#map-container > nav:not(#eda-header nav) { display: none !important; }
+#map-row { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
+#map { position: relative; flex: 1 1 auto !important; min-width: 180px; min-height: 0; overflow: hidden; }
+#draw-toolbar {
+  position: static !important; z-index: auto !important; flex: 0 0 38px; width: 38px; min-height: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 3px;
+  overflow-y: auto; background: var(--eda-panel); border-left: 1px solid var(--eda-border);
+}
+.tool-btn { width: 30px; height: 29px; flex: 0 0 auto; padding: 3px; color: var(--eda-muted); background: transparent; border-color: transparent; }
+.tool-btn:hover { color: var(--eda-fg); background: var(--eda-panel-alt); }
+.tool-btn.active { color: var(--eda-accent); background: var(--eda-selection); border-color: var(--eda-accent); }
+.tool-btn svg { width: 17px; height: 17px; }
+#draw-toolbar > div[style*="height:1px"] { flex: 0 0 1px; background: var(--eda-border) !important; }
+
+#eda-dock { display: flex; flex: 0 0 320px; width: 320px; min-width: 0; min-height: 0; flex-direction: column; background: var(--eda-panel); border-left: 1px solid var(--eda-border); }
+body.dock-collapsed #eda-dock { display: none !important; }
+#eda-dock-header { display: flex; align-items: center; gap: 7px; flex: 0 0 35px; padding: 6px 9px; border-bottom: 1px solid var(--eda-border); }
+#eda-dock-title { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+#eda-dock-close { min-width: 25px; min-height: 24px; padding: 0 5px; }
+#eda-tabs { display: flex; flex: 0 0 auto; gap: 2px; padding: 4px 5px 0; overflow-x: auto; border-bottom: 1px solid var(--eda-border); }
+#eda-tabs button { flex: 0 0 auto; min-height: 26px; padding: 4px 8px; color: var(--eda-muted); background: transparent; border-color: transparent; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+#eda-tabs button[aria-selected="true"] { color: var(--eda-fg); background: var(--eda-panel-alt); border-color: var(--eda-border); border-bottom-color: var(--eda-panel-alt); }
+#eda-dock-content { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0; }
+#eda-empty { padding: 20px 14px; color: var(--eda-muted); text-align: center; }
+
+/* Legacy inspectors are dock panels now; keep hidden state authoritative. */
+#eda-dock-content > :is(#image-controls, #primitive-controls, #route-controls, #shape-properties, #instruction-list) {
+  position: static !important; inset: auto !important; z-index: auto !important; display: block;
+  width: 100% !important; max-width: 100% !important; max-height: none !important; min-height: 0;
+  margin: 0 !important; padding: 10px !important; overflow: visible !important;
+  color: var(--eda-fg); background: transparent; border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
+  font-size: 12px;
+}
+#eda-dock-content > :is(#image-controls, #primitive-controls, #route-controls, #shape-properties, #instruction-list)[hidden] { display: none !important; }
+#eda-dock-content > [data-eda-active="false"] { display: none !important; }
+#eda-dock-content > [data-eda-active="true"] { display: block !important; }
+#image-controls .image-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 7px; margin-top: 7px; }
+#image-controls #image-stack { max-height: 130px; overflow-y: auto; }
+#image-controls input[type="text"] { width: 100%; min-width: 0; }
+#image-controls input[type="range"] { flex: 1 1 90px; min-width: 80px; }
+#image-controls select { min-width: 0; max-width: 100%; }
+#image-controls :is(button, select, input[type="text"]) { padding: 4px 6px; }
+#route-controls label, #primitive-controls label { display: flex; align-items: center; justify-content: space-between; gap: 7px; margin: 7px 0; }
+#route-controls :is(input, select) { width: 135px; max-width: 55%; }
+#route-controls textarea { width: 100%; max-height: 120px; resize: vertical; }
+#primitive-controls :is(input, select) { width: 125px; max-width: 55%; }
+#instruction-list article { padding: 8px 0; border-top: 1px solid var(--eda-border); }
+#instruction-list p { margin: 7px 0; overflow-wrap: anywhere; }
+#instruction-list pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.panel-close { position: static !important; float: right; min-width: 25px; min-height: 24px; margin: -3px 0 4px 6px !important; }
+.gds-shape-properties { position: static !important; width: 100% !important; max-width: 100% !important; max-height: none !important; overflow: visible !important; padding: 0 !important; color: var(--eda-fg) !important; background: transparent !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+.eda-workbench .gds-shape-properties :is(input, button) { color: var(--eda-fg) !important; background: var(--eda-input) !important; border-color: var(--eda-border) !important; }
+.eda-workbench .gds-shape-properties .help { color: var(--eda-muted) !important; }
+
+#instruction-bar { display: flex !important; flex-wrap: wrap; gap: 6px; align-items: center; flex: 0 0 auto; min-height: 45px; max-height: 200px; overflow: auto; padding: 6px 9px !important; color: var(--eda-fg) !important; background: var(--eda-panel) !important; border-top: 1px solid var(--eda-border) !important; }
+#instruction-bar > label { flex: 0 0 auto; }
+#instruction-bar textarea { flex: 1 1 220px; }
+#instruction-bar > button { flex: 0 0 auto; }
+#instruction-bar textarea { width: 100%; min-width: 0 !important; max-height: 80px; resize: vertical; }
+#instruction-bar :is(input, select, textarea, button) { color: var(--eda-fg); background: var(--eda-input); border-color: var(--eda-border); }
+#workflow-status { flex: 1 1 100%; min-width: 100px; color: var(--eda-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#eda-status { display: flex; align-items: center; gap: 12px; flex: 0 0 23px; min-width: 0; padding: 3px 9px; color: var(--eda-muted); background: var(--eda-panel); border-top: 1px solid var(--eda-border); font: 11px/1.2 var(--eda-font); }
+#eda-coordinates, #eda-selection { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#eda-selection { margin-left: auto; }
+
+#rebuild-overlay { background: color-mix(in srgb, var(--eda-bg) 82%, transparent) !important; color: var(--eda-accent) !important; }
+.ol-dragbox { border-color: var(--eda-accent) !important; }
+
+@media (max-width: 760px) {
+  #sidebar { flex-basis: 120px; width: 120px; }
+  body:not(.dock-collapsed) #sidebar { display: none; }
+  #eda-dock { flex-basis: 260px; width: 260px; }
+  #eda-document { max-width: 20%; }
+}
+@media (max-width: 560px) {
+  #eda-dock { flex-basis: 220px; width: 220px; }
+  #eda-header { gap: 4px; padding-left: 5px; padding-right: 5px; }
+  #eda-header nav button { padding-left: 5px; padding-right: 5px; }
+  #instruction-bar textarea { flex-basis: 100%; order: 2; }
+  #instruction-bar #queue-instruction { order: 3; }
+  #instruction-bar #copy-open-instructions, #instruction-bar #intent-apply { order: 4; }
+}
+
+/* Keep text entry useful when the canvas is narrow, instead of shrinking to a sliver. */
+body.eda-workbench #instruction-bar textarea { min-width: min(100%, 220px) !important; }
+body.eda-workbench :is(input, select, textarea) { color: var(--eda-fg) !important; background: var(--eda-input) !important; border-color: var(--eda-border) !important; }
+body.eda-workbench #eda-header button,
+body.eda-workbench #eda-dock-content button,
+body.eda-workbench #instruction-bar button { color: var(--eda-fg); background: var(--eda-input); border-color: var(--eda-border); }
+body.eda-workbench #instruction-bar #queue-instruction { background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); }
+
+body.eda-workbench #sidebar h4 { color: var(--eda-fg) !important; }
+#workflow-status { order: 5; }
+@media (max-width: 760px) { #eda-status > span:last-child { display: none; } }
+@media (max-width: 560px) { #eda-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+#work-order-heading {flex:1 1 100%;order:-2;}
+#work-order-targets {flex:1 1 100%;order:-1;color:var(--eda-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+
+.work-order-filters {display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin:8px 0;}
+.work-order-filters input {flex:1 1 100%;width:100%;min-width:0;padding:6px;border:1px solid var(--eda-border);border-radius:3px;}
+.work-order-filters select {flex:1;min-width:0;padding:5px;}
+#instruction-list .work-order-card {padding:12px 0;border-top:1px solid var(--eda-border);}
+.work-order-card > strong {display:block;font-family:var(--eda-mono);font-size:11px;overflow-wrap:anywhere;}
+#instruction-list .work-order-requirement {font-size:13px;font-weight:500;white-space:pre-wrap;margin:8px 0;}
+.work-order-card[data-status=done] > .work-order-title {color:var(--eda-success);}
+.work-order-card[data-status=reverted] > .work-order-title {color:var(--eda-muted);}
+.work-order-card .work-order-title {display:block;width:100%;padding:0;border:0;background:transparent;color:var(--eda-fg);text-align:left;font:600 11px var(--eda-mono);overflow-wrap:anywhere;cursor:pointer;}
+.work-order-card .work-order-title:hover,.work-order-card .work-order-title:focus-visible {text-decoration:underline;outline:1px solid var(--eda-border-strong);outline-offset:2px;}
+.work-order-comments {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px;margin-top:8px;}
+.work-order-comment-input {grid-column:1 / -1;width:100%;min-width:0;resize:vertical;box-sizing:border-box;}
+.work-order-comment {margin:4px 0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--eda-muted);}
+.work-order-tracking {margin:5px 0;color:var(--eda-success);font-size:11px;overflow-wrap:anywhere;}
+.work-order-tracking.needs-review {color:var(--vscode-editorWarning-foreground,#d7ba7d);}
+.work-order-card details {margin:8px 0;} .work-order-card summary {cursor:pointer;}
+.work-order-card ol {margin:8px 0;padding-left:18px;color:var(--eda-muted);}
+.work-order-card li {margin:5px 0;overflow-wrap:anywhere;}
+#work-order-summary {color:var(--eda-muted);font-size:11px;}
+
+/* Chat-style composer: context above one input surface, actions along its base. */
+body.eda-workbench #instruction-bar {
+  display:flex !important; flex-direction:column; align-items:stretch; flex-wrap:nowrap;
+  gap:4px; padding:7px 10px !important; max-height:220px; min-height:0;
+  background:var(--eda-bg) !important; font:12px/1.4 var(--eda-font);
+}
+.work-order-context {display:flex;flex-wrap:wrap;align-items:center;gap:2px 12px;min-width:0;}
+.work-order-context #work-order-heading {order:0;flex:none;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.work-order-context #work-order-targets {order:0;flex:1;min-width:100px;font-size:11px;line-height:1.5;}
+.work-order-input {flex:none;min-width:0;border:1px solid var(--eda-border);border-radius:10px;background:var(--eda-input);transition:border-color .12s,box-shadow .12s;overflow:hidden;}
+.work-order-input:focus-within {border-color:var(--eda-border-strong);box-shadow:0 0 0 1px var(--eda-border-strong);}
+body.eda-workbench #instruction-bar #intent-text {
+  display:block;box-sizing:border-box;width:100%;min-width:0 !important;min-height:44px;max-height:120px;
+  margin:0;padding:7px 10px 3px;border:0 !important;outline:none;border-radius:0;
+  box-shadow:none;resize:vertical;background:transparent !important;font:13px/1.5 var(--eda-font);
+}
+#intent-text::placeholder {color:var(--vscode-input-placeholderForeground,var(--eda-muted));opacity:1;}
+.work-order-actions {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 6px 5px;}
+.work-order-type {min-width:0;flex:0 1 145px;}
+.composer-label {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;}
+body.eda-workbench #instruction-bar #intent-action {width:100%;min-width:0;border:0 !important;border-radius:5px;padding:6px 3px;font:11px var(--eda-font);background:transparent !important;cursor:pointer;}
+#intent-action option {color:var(--eda-fg);background:var(--eda-input);}
+body.eda-workbench #instruction-bar #queue-instruction {
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;flex:none;min-height:28px;
+  border:1px solid transparent;border-radius:6px;padding:4px 8px;margin:0;white-space:nowrap;
+  font:600 11px/1.4 var(--eda-font);cursor:pointer;
+}
+#queue-instruction svg {width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+body.eda-workbench #instruction-bar #queue-instruction:hover:not(:disabled) {background:var(--vscode-button-hoverBackground,#1177bb);}
+body.eda-workbench #instruction-bar #queue-instruction:disabled {opacity:.5;cursor:wait;}
+.work-order-secondary {display:flex;gap:12px;flex-wrap:wrap;align-items:center;}
+body.eda-workbench #instruction-bar .work-order-secondary button {padding:1px 0;min-height:20px;margin:0;border:0;border-radius:2px;background:transparent;color:var(--eda-muted);font:11px var(--eda-font);cursor:pointer;}
+body.eda-workbench #instruction-bar .work-order-secondary button:hover {color:var(--eda-fg);text-decoration:underline;}
+#composer-hint {margin-left:auto;font-size:10px;color:var(--eda-muted);}
+body.eda-workbench #instruction-bar #workflow-status {order:0;flex:none;min-width:0;font-size:11px;}
+body.eda-workbench #instruction-bar :is(button,select):focus-visible {outline:1px solid var(--eda-border-strong);outline-offset:2px;}
+
+/* Compact, keyboard reachable canvas context menu. It lives in #map so its
+ * coordinates follow the viewport, while colors inherit the active VS Code theme. */
+#canvas-context-menu {
+  position: absolute; z-index: 80; min-width: 190px; max-width: min(260px, calc(100% - 12px));
+  display: grid; gap: 1px; padding: 4px; color: var(--eda-fg);
+  background: var(--eda-panel, var(--vscode-menu-background, #252526));
+  border: 1px solid var(--eda-border-strong, var(--vscode-menu-border, #454545));
+  border-radius: 5px; box-shadow: 0 6px 18px #0006; font: 12px/1.35 var(--eda-font, sans-serif);
+}
+#canvas-context-menu[hidden] { display: none; }
+#canvas-context-menu .context-menu-heading { padding: 4px 8px 3px; color: var(--eda-muted); font-size: 11px; border-bottom: 1px solid var(--eda-border); }
+#canvas-context-menu button { min-height: 26px; padding: 4px 8px; border: 0; border-radius: 3px; color: inherit; background: transparent; text-align: left; cursor: pointer; font: inherit; }
+#canvas-context-menu button:hover, #canvas-context-menu button:focus-visible { color: var(--eda-selection-fg, #fff); background: var(--eda-selection, #094771); outline: none; }
+#canvas-context-menu button[hidden] { display: none; }
+#canvas-context-menu { max-height: calc(100% - 8px); overflow-y: auto; }
+#canvas-context-menu button[data-shortcut]::after { content: attr(data-shortcut); float: right; margin-left: 18px; font-size: 10px; color: var(--eda-muted); }
+#canvas-context-menu button:is([data-action="fit-selection"],[data-action="clear-selection"],[data-action="image-remove"],[data-action="empty-fit"]) { border-top: 1px solid var(--eda-border); margin-top: 3px; padding-top: 7px; }
+#review-tools { padding: 10px; font-size: 12px; color: var(--eda-fg); }
+#review-tools details { border-top: 1px solid var(--eda-border); padding: 8px 0; }
+#review-tools summary { cursor: pointer; font-weight: 600; padding: 3px 0; }
+#review-tools p { line-height: 1.45; margin: 7px 0; color: var(--eda-muted); }
+#review-tools label { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 7px 0; }
+#review-tools input:not([type="checkbox"]),#review-tools select { min-width: 0; max-width: 100%; width: 100%; }
+#review-tools button { margin: 3px 4px 3px 0; max-width: 100%; overflow-wrap: anywhere; }
+#review-tools :is(input,select,button) { padding: 5px 7px; border: 1px solid var(--eda-border); border-radius: 4px; background: var(--eda-input); color: var(--eda-fg); }
+#review-tools :focus-visible { outline: 1px solid var(--eda-border-strong); outline-offset: 2px; }
+#review-diff-list { max-height: 300px; overflow: auto; }
+#review-diff-list button { display: block; width: calc(100% - 4px); text-align: left; }
+#eda-tabs { flex-wrap: wrap; }

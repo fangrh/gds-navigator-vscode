@@ -1,0 +1,12 @@
+{
+  "description": "Research TRIZ operation-log completion gate.",
+  "hooks": {
+    "Stop": [{ "hooks": [{
+      "type": "command",
+      "command": "sh -lc 'research-triz oplog status --gate --logs-root \"$(git rev-parse --show-toplevel)/logs\"'",
+      "commandWindows": "powershell -NoProfile -Command \"$projectRoot = git rev-parse --show-toplevel; research-triz oplog status --gate --logs-root (Join-Path $projectRoot 'logs')\"",
+      "timeout": 15,
+      "statusMessage": "Checking the Research TRIZ operation log"
+    }] }]
+  }
+}

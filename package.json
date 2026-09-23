@@ -34,6 +34,10 @@
         "title": "GDS: Select Python Environment"
       },
       {
+        "command": "gdsNavigator.setupProjectEnvironment",
+        "title": "GDS: Set Up Project Environment"
+      },
+      {
         "command": "gdsNavigator.runScript",
         "title": "GDS: Run Python Script (Build GDS)"
       },
@@ -60,6 +64,22 @@
       {
         "command": "gdsNavigator.insertImage",
         "title": "GDS: Insert Microscope Image"
+      },
+      {
+        "command": "gdsNavigator.openPython",
+        "title": "GDS: Open Generating Python"
+      },
+      {
+        "command": "gdsNavigator.relatedFiles",
+        "title": "GDS: Related Files"
+      },
+      {
+        "command": "gdsNavigator.usageLogs",
+        "title": "GDS: Usage Logging Controls"
+      },
+      {
+        "command": "gdsNavigator.reviewUsage",
+        "title": "GDS: Review Usage Log"
       }
     ],
     "menus": {
@@ -69,20 +89,33 @@
           "group": "navigation",
           "when": "activeCustomEditorId == 'gdsNavigator.viewer'"
         }
+      ],
+      "explorer/context": [
+        {
+          "command": "gdsNavigator.runScript",
+          "when": "resourceExtname == .py",
+          "group": "navigation"
+        }
       ]
     },
     "configuration": {
       "title": "GDS Navigator",
       "properties": {
         "gdsNavigator.pythonPath": {
+          "scope": "resource",
           "type": "string",
           "default": "",
-          "markdownDescription": "Python executable used to parse GDS files and run build scripts. Leave empty to use the environment picked via **GDS: Select Python Environment** (conda). The environment needs `klayout` installed; provenance generation additionally needs the [fangrh/gdsfactory](https://github.com/fangrh/gdsfactory) fork."
+          "markdownDescription": "Python executable used to parse GDS files and run build scripts. An explicit path or manually picked environment takes precedence. Otherwise GDS Navigator automatically checks installed environments and prefers verified provenance-enabled gdsfactory with klayout. Use **GDS: Select Python Environment** to choose or return to automatic detection. Detection never installs packages."
         },
         "gdsNavigator.parseTimeoutSec": {
           "type": "number",
           "default": 120,
           "description": "Timeout in seconds for parsing a GDS file."
+        },
+        "gdsNavigator.usageLogging.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Record local bounded usage events for workflow review. No network upload, geometry, instruction text, or clipboard contents. Disable to pause."
         }
       }
     }
@@ -93,7 +126,33 @@
     "watch": "node esbuild.mjs --watch",
     "build:webview": "node esbuild-webview.mjs",
     "package": "npm run build:webview && node esbuild.mjs --production",
-    "test": "echo \"no tests yet\""
+    "test": "npm run test:alignment && npm run test:reliability",
+    "test:alignment": "node test/alignment/numbered-markers.test.js && node test/alignment/reduced-marker-image.test.js && node test/alignment/numbered-inputs.test.js && node test/alignment/alignment-store.test.js && node test/alignment/alignment-persistence.test.js && node test/alignment/multi-image-store.test.js && node test/alignment/microscope-overlay.test.js && node test/alignment/image-display.test.js && node test/alignment/numbered-robustness.test.js",
+    "test:alignment:quick": "node test/alignment/numbered-markers.test.js",
+    "test:alignment:legacy": "node test/alignment/run-tests.js",
+    "test:alignment:viewer": "node test/alignment/numbered-viewer.test.js",
+    "test:reliability": "node test/reliability/selection.test.js && node test/reliability/build-contract.test.js && node test/reliability/provenance-contract.test.js && node test/reliability/viewer-instructions.test.js && node test/reliability/provider-contract.test.js && node test/reliability/primitives.test.js && node test/reliability/primitives-viewer.test.js",
+    "test:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js",
+    "test:conditions": "node test/reliability/working-conditions.test.js",
+    "test:alignment:random100": "python test/alignment/generate-random-corpus.py && node test/alignment/random-corpus.test.js",
+    "test:images:workflow": "node test/alignment/random-image-workflow.test.js && node test/alignment/multi-image-store.test.js",
+    "test:images:vscode": "npm run compile && node test/reliability/demo-provenance.test.js && node test/reliability/vscode-lifecycle.test.js --multi-image",
+    "test:handoff": "node test/reliability/handoff-contract.test.js && node test/reliability/handoff-viewer.test.js && node test/reliability/handoff-provider.test.js && node test/reliability/demo-provenance.test.js",
+    "test:handoff:vscode": "npm run compile && node test/reliability/demo-provenance.test.js && node test/reliability/vscode-lifecycle.test.js --handoff",
+    "test:files": "node test/reliability/file-links.test.js && node test/reliability/project-store.test.js && node test/reliability/external-outputs.test.js && node test/reliability/file-management.test.js",
+    "test:files:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js --file-links",
+    "test:images:display": "node test/alignment/image-display.test.js && node test/alignment/microscope-overlay.test.js && node test/alignment/multi-image-store.test.js",
+    "test:primitives": "node test/reliability/primitives.test.js && node test/reliability/primitives-viewer.test.js && node test/reliability/primitive-recreation.test.js",
+    "test:primitives:vscode": "npm run compile && node test/reliability/demo-provenance.test.js && node test/reliability/vscode-lifecycle.test.js --primitives",
+    "test:usage": "node test/reliability/usage-log.test.js && node test/reliability/usage-report.test.js && node test/reliability/usage-events.test.js && node test/reliability/usage-provider.test.js && node test/reliability/automatic-usage-report.test.js",
+    "test:usage:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js --usage",
+    "test:ui": "node test/reliability/eda-workbench.test.js && node test/reliability/shape-properties-viewer.test.js && node test/reliability/manhattan-route-viewer.test.js && node test/reliability/context-menu.test.js && node test/reliability/review-tools-viewer.test.js",
+    "test:review": "node test/reliability/layout-review.test.js && node test/reliability/review-store.test.js && node test/reliability/review-provider.test.js && node test/reliability/review-tools-viewer.test.js",
+    "test:environment": "node test/reliability/python-environment.test.js && node test/reliability/project-environment.test.js && node test/reliability/handoff-runtime.test.js",
+    "test:environment:setup": "npm run compile && node test/reliability/vscode-lifecycle.test.js --work-orders --setup-env",
+    "test:environment:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js --work-orders --auto-env",
+    "test:work-orders": "npm run compile && node test/reliability/instruction-queue.test.js && node test/reliability/work-order-queue.test.js && node test/reliability/work-order-tracking.test.js && node test/reliability/work-order-rebuild.test.js && node test/reliability/work-order-cli-tracking.test.js && node test/reliability/instruction-provider.test.js && node test/reliability/work-orders-viewer.test.js && node test/reliability/work-order-selection.test.js",
+    "test:work-orders:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js --work-orders"
   },
   "dependencies": {
     "ol": "^10.0.0"
@@ -102,6 +161,7 @@
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.75.0",
     "esbuild": "^0.24.0",
+    "puppeteer-core": "^25.11.0",
     "typescript": "^5.7.0"
   },
   "repository": {

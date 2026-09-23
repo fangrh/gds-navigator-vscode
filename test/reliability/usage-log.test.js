@@ -1,0 +1,23 @@
+const assert = require('assert/strict'), fs = require('fs'), path = require('path'), os = require('os'), { buildSync } = require('esbuild');
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gds-usage-')); const out = path.join(tmp, 'usage.cjs');
+buildSync({ entryPoints: [path.join(__dirname, '../../src/usageLog.ts')], bundle: true, platform: 'node', format: 'cjs', outfile: out });
+const { UsageLog, hashDocument } = require(out);
+(async () => {
+    const errors = []; const log = new UsageLog(tmp, { maxFileBytes: 180, maxTotalBytes: 5000, onError: e => errors.push(e), extensionVersion: '0.1.0' });
+    const usageDir = path.join(tmp, '.gds-navigator', 'usage'); fs.mkdirSync(usageDir, { recursive: true }); fs.writeFileSync(path.join(usageDir, 'keep.txt'), 'keep'); fs.writeFileSync(path.join(usageDir, 'other.jsonl'), 'keep');
+    log.record('route.intent', { source: 'viewer', phase: 'intent', documentId: 'C:\\Sensitive\\chip.gds', operationId: 'abc', control: 'draw', kind: 'route', count: 2 });
+    log.record('route.result', { outcome: 'success', durationMs: 3.5 }); log.record('bad action!', { reason: 'raw text should drop' }); await log.flush();
+    const files = fs.readdirSync(path.join(tmp, '.gds-navigator', 'usage')).filter(x => x.startsWith(`session-${log.sessionId}-`) && x.endsWith('.jsonl')); assert(files.length >= 1);
+    const lines = files.flatMap(f => fs.readFileSync(path.join(tmp, '.gds-navigator', 'usage', f), 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    assert.equal(lines[0].action, 'route.intent'); assert.equal(lines[0].seq, 1); assert.equal(lines[0].extensionVersion, '0.1.0'); assert.equal(lines[0].documentId, hashDocument('C:\\Sensitive\\chip.gds')); assert(!JSON.stringify(lines).includes('Sensitive'));
+    assert(log.status().dropped >= 1); const before = fs.readdirSync(path.join(tmp, '.gds-navigator', 'usage')).length; log.setEnabled(false); log.record('disabled'); await log.flush(); assert.equal(fs.readdirSync(path.join(tmp, '.gds-navigator', 'usage')).length, before);
+    assert.equal(fs.readFileSync(path.join(usageDir, 'keep.txt'), 'utf8'), 'keep'); assert.equal(fs.readFileSync(path.join(usageDir, 'other.jsonl'), 'utf8'), 'keep'); await log.clear(); assert(!fs.readdirSync(usageDir).some(f => f.startsWith(`session-${log.sessionId}-`)));
+    const retained = new UsageLog(tmp); retained.record('older.session'); await retained.flush();
+    log.setEnabled(true); log.record('before.clear'); await log.clear(); log.record('after.clear'); await log.flush();
+    const remaining = fs.readdirSync(usageDir).filter(f => /^session-[A-Za-z0-9-]+-\d{4}\.jsonl$/.test(f));
+    assert.equal(remaining.length, 1); const last = JSON.parse(fs.readFileSync(path.join(usageDir, remaining[0]), 'utf8').trim()); assert.equal(last.action, 'after.clear'); assert(last.seq > 2);
+    log.record('privacy.test', { kind: 'private-secret', text: 'never-store-this', geometry: [1,2] }); await log.flush(); assert(!fs.readFileSync(path.join(usageDir, remaining[0]), 'utf8').includes('private-secret'));
+    fs.writeFileSync(path.join(usageDir, 'session-old-0001.jsonl'), '{}\n'); fs.utimesSync(path.join(usageDir, 'session-old-0001.jsonl'), new Date(0), new Date(0)); log.record('retention.test'); await log.flush(); assert(!fs.existsSync(path.join(usageDir, 'session-old-0001.jsonl'))); assert(fs.existsSync(path.join(usageDir, 'keep.txt')));
+    const failure = new UsageLog(path.join(tmp, 'bad'), { onError: () => {} }); fs.mkdirSync(path.join(tmp, 'bad'), { recursive: true }); fs.writeFileSync(path.join(tmp, 'bad', '.gds-navigator'), 'file'); failure.record('safe'); await failure.flush(); assert(failure.status().failed >= 1);
+    console.log(JSON.stringify({ status: 'passed', checks: ['ordering', 'hashing', 'allowlist', 'rotation', 'disabled', 'failure-soft'] }));
+})().catch(e => { console.error(e); process.exitCode = 1; });

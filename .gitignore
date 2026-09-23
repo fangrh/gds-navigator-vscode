@@ -15,3 +15,16 @@ test/fixtures/*.tif
 test/fixtures/*.png
 webview/test-standalone.html
 scripts/_viewer_check.js
+
+logs/
+
+# Curated acceptance inputs required by the reproducible tests
+!test/fixtures/electrode100-microscope.png
+!test/fixtures/electrode100-reduced.png
+!test/fixtures/jj_pad_center_100_test.gds
+!test/fixtures/jj_pad_center_50_test.gds
+
+# Local user activity and generated summaries
+.gds-navigator/usage/
+.gds-navigator/usage-report.md
+.gds-navigator/usage-report.json

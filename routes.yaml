@@ -1,0 +1,154 @@
+schema_version: 1
+routes:
+- id: route-numbered-marker-registration
+  problem: Numbered microscope markers must align to GDS without electrode or background
+    bias.
+  solution: Match full vector label templates; fit only markers; validate known poses,
+    negative labels, held-out boundaries, and nonmarker mutation invariance.
+  skill: scientific-tdd
+  source: repo
+  notes: Confirmed by logs/numbered-markers/tests/report.json and viewer/report.json;
+    marker registration does not establish electrode agreement.
+- id: route-exploratory-script
+  problem: 一个有界的私人探索问题，需要最快拿到可信的小模型答案。
+  solution: 等价小模型 + 证伪器 + 留存证据的快速循环。
+  skill: research-fast
+  source: repo
+  notes: 默认入口；产物分级不明时先用 research-router。
+- id: route-artifact-classification
+  problem: 不确定一份研究工件该按什么深度验证（私有脚本/可复用模块/生产工具）。
+  solution: 先分级再选门，记录每个门为何适用或为何不适用。
+  skill: research-router
+  source: repo
+  notes: 分级结论不可静默降级。
+- id: route-scientific-claim
+  problem: 需要建立或推进一个科学声明的状态（提议→代数验证→数值收敛…）。
+  solution: 科学 TDD：独立参照、收敛证据、状态分级、留存负结果。
+  skill: scientific-tdd
+  source: repo
+  notes: 成功的进程退出不是科学验证。
+- id: route-second-occurrence
+  problem: 一个研究流程第二次手动出现，即将重复劳动。
+  solution: 提取为注册工作流（check/run/status），写机器可读清单。
+  skill: workflow-first
+  source: repo
+  notes: 第二次出现即提取，不停留在聊天配方。
+- id: route-deliverable-definition
+  problem: 一个 Capsule 需要在实现前固定"交付什么才算完成"。
+  solution: 先写交付契约（声明种类/目标状态/槽位/限制），再实现，最后过完成门。
+  skill: deliverable-contract
+  source: repo
+  notes: 进程退出不等于完成。
+- id: route-session-close
+  problem: 会话收尾，或操作日志自上次审查新增满三十条。
+  solution: oplog review 审查重复与慢操作，走矩阵比对，缺口写入 ISSUES.md。
+  skill: operation-log
+  source: repo
+  notes: 与 using-triz 的技能反馈共用 ISSUES.md。
+- id: route-fast-match
+  problem: 需要为问题文本选出矩阵模式，并让本地零模型分类器随行学习。
+  solution: 以 agent/标签路由（matrix query）为主判定；每次路由后运行 matrix local-match --text <问题>
+    --primary <主判定> 做交叉校验并记账；定期 matrix local-match --evaluate 看一致率，分歧样本用于调优分词与同义词表。
+  skill: operation-log
+  source: repo
+  notes: 分类器只随行不裁决；分歧记录在 logs/local-matcher/（本地）。Jev 校准概率版为后续可选升级（需 key，暂缓）。
+- id: route-self-review
+  problem: 论文写完准备投 PRL/Nature/Science，需要按审稿人标准自审，或收到审稿意见需要解析分类。
+  solution: 查阅审稿矩阵（knowledge/reviewer_matrix.yaml），按六个维度逐条检查：有效性、重要性、广泛兴趣、新颖性、表述、可测试性。最致命组合是"技术正确但不够重要且太窄"——这是无法通过修改挽救的拒稿。
+  skill: reviewer-matrix
+  source: repo
+  notes: 六维度来自 APS 编辑政策、Nature 审稿指南、AgentReview 方法学。
+- id: route-innovation-strategy
+  problem: 研究方向初步成型，需要判断是否具有 PRL/Nature 级突破潜力，或选择最有效的创新形式。
+  solution: 查阅创新矩阵（knowledge/innovation.yaml），将当前结果匹配到八种突破机理之一；若匹配到多种，选最强的两种组合；若都不匹配，重新审视研究方向的定位。
+  skill: innovation-matrix
+  source: repo
+  notes: 八种机理均源自 TRIZ 发明原理与 2023-2025 年 PRL/Nature 论文分析。
+- id: route-gain-without-loss
+  problem: 需要两全——改进某特性必然恶化另一特性（精度vs速度、分辨率vs内存），或问题陈述来自他人、疑似预中毒。
+  solution: 走 ariz 技能：两短语重述与旁路问题，声明 IFR 与旋钮式矛盾，按时间/空间/部分-整体/方向/视角级联分离，STC 扰动，未解则回环探索树。
+  skill: ariz
+  source: repo
+  notes: 妥协不是解决；补偿是显式标记的未解。级联闸门均为可答测试问句。
+- id: route-exploration-attempt
+  problem: 要开始一次新的研究尝试（变体/细化/转向/复现），或某次尝试有了结局。
+  solution: explore add 记录假设与父节点，close 记录结局与证据；会话收尾用 explore tree 复盘整棵尝试树。
+  skill: scientific-tdd
+  source: repo
+  notes: 尝试树是入库的科学记录（research/exploration.yaml），可渲染为 SVG。
+- id: route-acceptance-standard
+  problem: 算出一个结果但不知道怎么判断对错，需要选择验收标准。
+  solution: 按问题类查验收矩阵（matrix explain 的 ACCEPTANCE STANDARDS 或 knowledge/acceptance.yaml），按强度顺序采纳；标准不适用或缺失时写入
+    ISSUES.md。
+  skill: scientific-tdd
+  source: repo
+  notes: 验收标准与交付契约基线互补；矩阵改动一律先走 ISSUES.md。
+- id: route-new-feature
+  problem: 要新增功能或修改行为，需求与设计尚未成形。
+  solution: 先头脑风暴澄清意图与设计并获批，再进入实现。
+  skill: brainstorming
+  source: superpowers
+  notes: 仓库技能不覆盖的流程场景交给 superpowers。
+- id: route-bug
+  problem: 遇到 bug、测试失败或非预期行为。
+  solution: 系统化调试，先定位根因再修复。
+  skill: systematic-debugging
+  source: superpowers
+  notes: ''
+- id: route-implementation
+  problem: 设计已定，进入实现阶段。
+  solution: 测试驱动开发，红-绿-重构。
+  skill: test-driven-development
+  source: superpowers
+  notes: ''
+- id: route-claim-done
+  problem: 即将宣布工作完成、修复生效或准备提交。
+  solution: 先跑验证命令并确认输出，再下结论。
+  skill: verification-before-completion
+  source: superpowers
+  notes: ''
+- id: route-plain-reading
+  problem: 纯阅读、问答或查找单个事实，不改动任何东西、不建立声明。
+  solution: 不用技能，直接做。
+  skill: none
+  source: none
+  notes: 一旦要改代码或下结论，重新路由。
+- id: route-unresolved-gate
+  problem: 科学或软件验证门失败、超时、证据不足、signal_unresolved，或矩阵返回 no_admissible_route。
+  solution: A diagnosis is not a terminal outcome；分类失败并查询矩阵，随后 decompose 为可执行子门，打开最小
+    variant/refinement/pivot/reproduction，并立即执行首个有界判别器。
+  skill: scientific-tdd
+  source: repo
+  notes: 只有完成或明确的用户输入、授权、外部依赖、资源时限或安全边界才允许停止；不得用限制声明代替恢复尝试。
+- id: route-analytic-before-scan
+  problem: 即将启动多参数或高保真数值扫描，但尚未用解析结构缩小问题。
+  solution: 先做有界解析分诊：从控制方程、对称性、守恒律、无量纲群、极限/渐近、界、单调性、可辨识性、灵敏度或降维坐标中提取约束，排除不可能区域并定义针对明确假设的扫描；只有完整扫描成本（准备成本
+    + 点数 × 单点成本）在声明预算内确属廉价，或解析分诊无有效判别器时，才可先扫描并记录理由。
+  skill: scientific-tdd
+  source: repo
+  notes: 不强求闭式解；禁止用宽泛盲扫替代解析推理或收敛证据。
+- id: route-exploratory-research-map
+  problem: 探索型研究跨越多个会话、假设、方法或分支，需要保持目标、历史、证据与用户反馈的整体视图。
+  solution: 建立并维护项目根目录 RESEARCH_MAP.md：先固定 perspective target，再反向分解决定性门与局部问题；用稳定节点记录分支、状态、证据、图像、决策历史和用户评论，在规划、分支/方法
+    pivot、重要结果及会话收尾时重读和更新。
+  skill: research-map
+  source: repo
+  notes: 单次有界计算不强制建图；用户评论原文保留，代理响应另记；后台周期检查须显式自动化，不能假装 skill 会自行唤醒。
+- id: route-automatic-action-ledger
+  problem: 代理可能忘记主动记录操作，导致项目变更与工具动作缺少独立于 LLM 自觉性的事实证据。
+  solution: 使用 Codex SessionStart/PostToolUse/Stop 同步 hooks 写入不可变自动事件文件；只保存工具输入输出哈希与
+    Git 工作树内容指纹，并在 Stop 时对外部变化做 reconciliation。自动事实层与语义科研日志分离，后者仍由 oplog task-step
+    记录解释，自动事件不得推断科学验收。
+  skill: operation-log
+  source: repo
+  notes: 项目 hooks 需用户 review/trust；WebSearch 等 hosted tools 与特殊路径可能不触发 tool hook，Stop
+    快照只补工作树证据，不构成完整 OS 审计或因果归属。
+- id: route-backlog-project-control
+  problem: 初始化 TRIZ 项目，或需要安排研究目标、尝试、依赖、计划、评论及完成记录。
+  solution: TRIZ init 同时执行原生 backlog init；先读安装版 instructions overview 和对应生命周期指南，通过
+    Backlog CLI 管理原生任务及依赖。TRIZ 提供科学方法与证据门，脑图由原生 JSON 生成，不维护第二套任务状态。
+  skill: research-map
+  source: repo
+  notes: 先用 backlog bind 绑定会话和原生任务；matrix query/diagnose 用 --backlog-session 留存决策；oplog
+    自动填充 task_id；用 backlog finalize 校验后完成。Backlog Done 不代表科学验收；旧 exploration 与 claim
+    graph 保留为历史或证据；CLI 指令与验证检查不是操作系统隔离。

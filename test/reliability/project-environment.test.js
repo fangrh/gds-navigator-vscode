@@ -1,0 +1,29 @@
+const assert=require('assert/strict'),fs=require('fs'),path=require('path'),os=require('os'),cp=require('child_process');
+const esbuild=require('esbuild');
+const root=path.resolve(__dirname,'../..'),temp=fs.mkdtempSync(path.join(os.tmpdir(),'gds shared env '));
+esbuild.buildSync({entryPoints:[path.join(root,'src/projectEnvironment.ts')],outfile:path.join(temp,'project-env.cjs'),bundle:true,platform:'node'});
+const {saveProjectEnvironment,readProjectEnvironment}=require(path.join(temp,'project-env.cjs'));
+const diagnostics={executable:process.execPath,gdsfactory:{path:'test/fork'},klayout:{path:'test/db'},provenance:{available:true}};
+fs.writeFileSync(path.join(temp,'AGENTS.md'),'# Existing guidance\nKeep this.\n');
+saveProjectEnvironment(temp,diagnostics);
+assert.equal(readProjectEnvironment(temp).python,process.execPath);
+assert(fs.readFileSync(path.join(temp,'AGENTS.md'),'utf8').startsWith('# Existing guidance'));
+saveProjectEnvironment(temp,diagnostics);
+assert.equal(fs.readFileSync(path.join(temp,'AGENTS.md'),'utf8').split('<!-- gds-navigator-environment:start -->').length,2);
+const check=path.join(temp,'script with spaces.cjs');
+fs.writeFileSync(check,'console.log(JSON.stringify({env:process.env.GDS_PROVENANCE,args:process.argv.slice(2),exe:process.execPath}))');
+if(process.platform==='win32'){
+ const output=cp.execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(temp,'.gds-navigator/run-python.ps1'),check,'--out','argument with spaces'],{encoding:'utf8',windowsHide:true});
+ const parsed=JSON.parse(output.trim());assert.equal(parsed.env,'1');assert.deepEqual(parsed.args,['--out','argument with spaces']);assert.equal(parsed.exe,process.execPath);
+ const cmdOutput=cp.execFileSync('cmd.exe',['/d','/s','/c',`""${path.join(temp,'gds-python.cmd')}" "${check}" --out "argument with spaces""`],{encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true});
+ assert.deepEqual(JSON.parse(cmdOutput.trim()).args,['--out','argument with spaces']);
+}
+const before=fs.readFileSync(path.join(temp,'.gds-navigator/environment.json'),'utf8');
+assert.throws(()=>saveProjectEnvironment(temp,{...diagnostics,provenance:{available:false}}));
+assert.equal(fs.readFileSync(path.join(temp,'.gds-navigator/environment.json'),'utf8'),before);
+fs.writeFileSync(path.join(temp,'gds-python.cmd'),'custom user launcher');
+assert.throws(()=>saveProjectEnvironment(temp,diagnostics),/custom file/);
+assert.equal(fs.readFileSync(path.join(temp,'gds-python.cmd'),'utf8'),'custom user launcher');
+const other=fs.mkdtempSync(path.join(os.tmpdir(),'gds-env-other-'));saveProjectEnvironment(other,{...diagnostics,gdsfactory:{path:'other/fork'}});
+assert.equal(readProjectEnvironment(temp).gdsfactory,'test/fork');assert.equal(readProjectEnvironment(other).gdsfactory,'other/fork');
+console.log(JSON.stringify({status:'passed',agentGuidePreserved:true,argvAndEnvironment:true,customFilesProtected:true,folderIsolation:true}));

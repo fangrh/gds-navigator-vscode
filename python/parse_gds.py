@@ -29,7 +29,7 @@ PROV_ID_PROP_KEY = 1002
 def _load_sidecar(gds_path):
     """Load provenance sidecar JSON for a GDS file.
 
-    Returns a tuple of (entries_by_id, ports_by_component, ref_names).
+    Returns a tuple of (entries_by_id, ports_by_component, ref_names, warnings).
     entries_by_id: dict mapping prov_id (int) to the corresponding entry dict.
     ports_by_component: dict mapping component name to list of port dicts.
     ref_names: dict mapping instance name to component name.
@@ -47,17 +47,33 @@ def _load_sidecar(gds_path):
             sidecar_path = candidate
             break
     if sidecar_path is None:
-        return {}, {}, {}
+        return {}, {}, {}, []
     try:
         with open(sidecar_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         entries = data.get("entries", [])
-        entries_by_id = {entry["id"]: entry for entry in entries if "id" in entry}
+        warnings = []
+        if not isinstance(entries, list):
+            warnings.append("sidecar entries is not a list")
+            entries = []
+        else:
+            warnings.extend(f"sidecar entry {i} is malformed" for i, entry in enumerate(entries) if not isinstance(entry, dict) or not isinstance(entry.get("id"), (str, int)))
+        entries_by_id = {
+            entry["id"]: entry
+            for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("id"), (str, int))
+        }
         ports_by_component = data.get("ports", {})
+        if not isinstance(ports_by_component, dict):
+            warnings.append("sidecar ports is not an object")
+            ports_by_component = {}
         ref_names = data.get("ref_names", {})
-        return entries_by_id, ports_by_component, ref_names
+        if not isinstance(ref_names, dict):
+            warnings.append("sidecar ref_names is not an object")
+            ref_names = {}
+        return entries_by_id, ports_by_component, ref_names, warnings
     except Exception:
-        return {}, {}, {}
+        return {}, {}, {}, ["sidecar JSON could not be read"]
 
 
 def _parse_call_stack_string(frame_str):
@@ -81,11 +97,16 @@ def _build_provenance_from_sidecar(entry, cell_name, ports_by_component=None):
     Returns a dict with keys: file, line, function, call_chain, cell,
     and optionally source_text and ports.
     """
-    primary_file = entry["file"]
+    primary_file = entry.get("file") if isinstance(entry.get("file"), str) else ""
     primary_dir = os.path.dirname(primary_file) if primary_file else ""
 
-    call_chain = [{"file": primary_file, "line": entry["line"], "function": entry["function"]}]
-    for frame_str in entry.get("call_stack", []):
+    call_chain = [{"file": primary_file, "line": entry.get("line"), "function": entry.get("function", "")}]
+    call_stack = entry.get("call_stack", [])
+    if not isinstance(call_stack, list):
+        call_stack = []
+    for frame_str in call_stack:
+        if not isinstance(frame_str, str):
+            continue
         parsed = _parse_call_stack_string(frame_str)
         if parsed is not None:
             # call_stack uses bare filenames (pathlib.Path.name),
@@ -95,9 +116,9 @@ def _build_provenance_from_sidecar(entry, cell_name, ports_by_component=None):
             call_chain.append(parsed)
 
     prov = {
-        "file": entry["file"],
-        "line": entry["line"],
-        "function": entry["function"],
+        "file": primary_file,
+        "line": entry.get("line"),
+        "function": entry.get("function", ""),
         "call_chain": call_chain,
         "cell": cell_name or entry.get("component", ""),
     }
@@ -327,7 +348,7 @@ def _get_feature_provenance(iterator, provenance_by_cell, sidecar_by_id, ports_b
     if placement_entry:
         primary_file = placement_entry.get("file", "")
         primary_dir = os.path.dirname(primary_file) if primary_file else ""
-        new_chain = [{"file": primary_file, "line": placement_entry["line"], "function": placement_entry.get("function", "")}]
+        new_chain = [{"file": primary_file, "line": placement_entry.get("line"), "function": placement_entry.get("function", "")}]
         for frame_str in placement_entry.get("call_stack", []):
             parsed = _parse_call_stack_string(frame_str)
             if parsed is not None:
@@ -399,7 +420,7 @@ def parse_gds(filepath: str) -> dict:
     layout.read(filepath)
 
     provenance_by_cell = _extract_provenance(layout)
-    sidecar_by_id, ports_by_component, ref_names = _load_sidecar(filepath)
+    sidecar_by_id, ports_by_component, ref_names, sidecar_warnings = _load_sidecar(filepath)
 
     top = layout.top_cell()
     if top is None:
@@ -453,7 +474,7 @@ def parse_gds(filepath: str) -> dict:
         except Exception:
             pass
 
-    result = {"type": "FeatureCollection", "features": features}
+    result = {"type": "FeatureCollection", "features": features, "top_cell": top.name if top else None}
     if features:
         result["bbox"] = [min_x, min_y, max_x, max_y]
     # Inject version marker + diagnostic summary so the viewer / TypeScript
@@ -462,6 +483,7 @@ def parse_gds(filepath: str) -> dict:
         "ver": 4,
         "dbg_on": _DBG,
         "array_calls": len(_DBG_LOG),
+        "sidecar_warnings": sidecar_warnings,
     }
     _DBG_LOG.clear()
     return result

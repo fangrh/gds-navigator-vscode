@@ -15,7 +15,7 @@ export function sidecarCandidates(gdsPath: string): string[] {
 
 export function findSidecar(gdsPath: string): string | null {
     for (const candidate of sidecarCandidates(gdsPath)) {
-        if (fs.existsSync(candidate)) {
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
             return candidate;
         }
     }
@@ -42,7 +42,12 @@ export function readSidecar(sidecarPath: string): SidecarData | null {
     try {
         const data = JSON.parse(fs.readFileSync(sidecarPath, 'utf-8'));
         if (data && Array.isArray(data.entries)) {
-            return data as SidecarData;
+            const entries = data.entries.filter((entry: unknown): entry is SidecarEntry => Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)));
+            return {
+                entries,
+                ...(data.ports && typeof data.ports === 'object' ? { ports: data.ports } : {}),
+                ...(data.ref_names && typeof data.ref_names === 'object' ? { ref_names: data.ref_names } : {}),
+            };
         }
         return null;
     } catch {
@@ -52,8 +57,8 @@ export function readSidecar(sidecarPath: string): SidecarData | null {
 
 /**
  * Guess which .py script generated the GDS from its sidecar: the most
- * frequently referenced existing .py file among the entries. Paths recorded
- * on another machine are resolved by basename next to the GDS.
+ * frequently referenced existing .py file among the entries. Missing paths and
+ * tied candidates stay unresolved so a rebuild cannot run an arbitrary script.
  */
 export function deriveScriptFromSidecar(gdsPath: string): string | undefined {
     const sidecar = findSidecar(gdsPath);
@@ -68,25 +73,33 @@ export function deriveScriptFromSidecar(gdsPath: string): string | undefined {
     const counts = new Map<string, number>();
     for (const entry of data.entries) {
         let file = entry.file;
-        if (!file || !file.endsWith('.py')) {
+        if (typeof file !== 'string' || !file.toLowerCase().endsWith('.py')) {
             continue;
         }
-        if (!fs.existsSync(file)) {
-            const local = path.join(gdsDir, path.basename(file));
-            if (!fs.existsSync(local)) {
+        if (!path.isAbsolute(file)) {
+            const sidecarRelative = path.resolve(path.dirname(sidecar), file);
+            const gdsRelative = path.resolve(gdsDir, file);
+            if (fs.existsSync(sidecarRelative) && fs.statSync(sidecarRelative).isFile()) file = sidecarRelative;
+            else if (fs.existsSync(gdsRelative) && fs.statSync(gdsRelative).isFile()) file = gdsRelative;
+            else {
                 continue;
             }
-            file = local;
+        } else if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+            continue;
         }
         counts.set(file, (counts.get(file) || 0) + 1);
     }
     let best: string | undefined;
     let bestCount = 0;
+    let tied = false;
     counts.forEach((count, file) => {
         if (count > bestCount) {
             best = file;
             bestCount = count;
+            tied = false;
+        } else if (count === bestCount) {
+            tied = true;
         }
     });
-    return best;
+    return tied ? undefined : best;
 }

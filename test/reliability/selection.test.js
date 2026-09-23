@@ -1,0 +1,26 @@
+const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const cp = require('child_process');
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gds-selection-'));
+require('esbuild').buildSync({entryPoints:['src/selectionExport.ts'],bundle:true,platform:'node',outfile:path.join(tmp,'selection.cjs')});
+const {toYaml,selectionDocument,validateAnnotations,elementId} = require(path.join(tmp,'selection.cjs'));
+const geometry={type:'Polygon',coordinates:[[[.000123456,2],[3,4],[5,2],[.000123456,2]]]};
+const components=[{provId:'a',layer:'1/0',geometry,provenance:{}},{provId:'b',geometry,provenance:{file:'C:\\two words\\a.py',line:12,array_index:[[1,2],[3,4]],call_chain:[{file:'a.py',line:3}]}},{provId:'draw',drawn:true,geometry,intent:{action:'move',text:'a: b\n# user instructions',targetIds:['a'],snapshot:'old'}}];
+const data=selectionDocument('C:\\chip.gds','new',components,'TOP');
+const yaml=toYaml(data);
+// Independent YAML parser, not a roundtrip through our own implementation.
+const decoded=cp.execFileSync('python',['-c','import sys,yaml,json; print(json.dumps(yaml.safe_load(sys.stdin.read())))'],{input:yaml,encoding:'utf8'});
+assert.deepStrictEqual(JSON.parse(decoded),JSON.parse(JSON.stringify(data)));
+assert.equal(data.elements.length,2);
+assert.equal(data.annotations[0].target_status,'stale_review_required');
+assert.equal(data.elements[0].geometry.coordinates[0][0][0],.000123456);
+assert.equal(elementId(geometry,0),elementId(geometry,0));
+assert.notEqual(elementId(geometry,0),elementId(geometry,1));
+assert.equal(elementId({geometry,properties:{layer:1,provenance:{file:'old.py'}}},0),elementId({geometry,properties:{layer:1,provenance:{file:'new.py'}}},0));
+assert(validateAnnotations([{id:'draw',geometry}]));
+assert(!validateAnnotations([{id:'draw',geometry},{id:'draw',geometry}]));
+assert(!validateAnnotations([{id:'draw',geometry:{type:'Circle',center:[0,0],radius:NaN}}]));
+fs.rmSync(tmp,{recursive:true});
+console.log('Selection YAML, identity, precision, missing provenance and annotation checks passed');
