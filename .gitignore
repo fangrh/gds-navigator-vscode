@@ -7,6 +7,10 @@ media/ol.css
 
 # local python venv for provenance testing (create with scripts/setup-venv.ps1)
 .venv-fork/
+.venv/
+.venv-new/
+.conda-gds/
+.conda-gds-new/
 
 # additional large local fixtures stay out of git; the curated demo pair
 # (chip285_markers_geo.json + nbse2_sample1-1_micro.jpg) IS committed.

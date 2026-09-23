@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { readProjectEnvironment, saveProjectEnvironment } from './projectEnvironment';
+import { PythonEnvironmentManager, type EnvironmentManager } from './pythonEnvironmentManager';
 
 export interface CondaEnv { name: string; prefix: string; }
 export interface PythonDiagnostics {
@@ -82,7 +83,7 @@ export async function discoverPythonCandidates(_context: vscode.ExtensionContext
     const add = (value?: string) => { if (value && !out.includes(value)) out.push(value); };
     const folders = vscode.workspace.workspaceFolders || [];
     for (const folder of folders) {
-        for (const name of ['.venv-fork', '.venv', 'venv']) add(pythonInPrefix(path.join(folder.uri.fsPath, name)));
+        for (const name of ['.venv-fork', '.venv', '.venv-new', '.conda-gds', '.conda-gds-new', 'venv']) add(pythonInPrefix(path.join(folder.uri.fsPath, name)));
     }
     let configured = vscode.workspace.getConfiguration('python').get<string>('defaultInterpreterPath', '');
     configured = configured.replace(/\$\{workspaceFolder\}/g, folders[0]?.uri.fsPath || '');
@@ -304,11 +305,12 @@ export class EnvProvider {
         this.updateStatusBar();
     }
     private async runProjectSetup(root: string, file: string | undefined, force: boolean): Promise<void> {
+        if (force) return this.runInteractiveSetup(root, file);
         const saved = readProjectEnvironment(root);
         if (!force && saved) {
             const checked = await this.probe(saved.python);
             const configured = this.config(file).get<string>('pythonPath', '').trim();
-            if (!checked.error && checked.provenance?.available && checked.klayout?.path && !checked.klayout.error && (!configured || configured === saved.python)) {
+            if (!checked.error && (!configured || configured === saved.python)) {
                 if (!configured) await this.persistProject(root, file, checked);
                 return;
             }
@@ -336,5 +338,98 @@ export class EnvProvider {
         }
         await this.persistProject(root, file, diagnostics);
         void vscode.window.showInformationMessage(`GDS project ready. Python is saved for ${path.basename(root)}. Agents can use gds-python.cmd; instructions are in AGENTS.md.`);
+    }
+
+    private async chooseExistingPython(root: string, manager: PythonEnvironmentManager): Promise<string | undefined> {
+        const local = await discoverPythonCandidates(this.context);
+        const conda = await this.listCondaEnvs();
+        const configured = [this.getPython(path.join(root, 'layout.gds')), ...local, ...conda.map(env => pythonInPrefix(env.prefix))];
+        const found = await manager.discoverPythonExecutables(configured, { timeoutMs: 5000 });
+        const choices: Array<vscode.QuickPickItem & { python?: string }> = [
+            ...found.filter(item => path.isAbsolute(item.executable)).map(item => ({
+                label: `$(symbol-method) ${path.basename(item.executable)}`,
+                description: `${item.executable}${item.version ? ` · Python ${item.version}` : ''}`,
+                python: item.executable,
+            })),
+            { label: '$(edit) Enter interpreter path…' },
+        ];
+        const selected = await vscode.window.showQuickPick(choices, { placeHolder: 'Choose an installed Python for every project in this folder' });
+        if (!selected) return undefined;
+        if (selected.python) return selected.python;
+        const entered = await vscode.window.showInputBox({ prompt: 'Absolute path to a Python executable', ignoreFocusOut: true });
+        return entered?.trim().replace(/^"(.*)"$/, '$1');
+    }
+
+    private async runInteractiveSetup(root: string, file: string | undefined): Promise<void> {
+        const manager = new PythonEnvironmentManager();
+        const tools = await manager.discoverTools({ timeoutMs: 5000 });
+        const current = readProjectEnvironment(root)?.python || this.config(file).get<string>('pythonPath', '').trim();
+        const choices: Array<vscode.QuickPickItem & { action: 'current' | 'existing' | EnvironmentManager }> = [
+            ...(current ? [{ label: '$(check) Keep current interpreter', description: current, action: 'current' as const }] : []),
+            { label: '$(folder-opened) Choose an installed Python', description: 'System, Conda, or another existing environment', action: 'existing' },
+            ...(tools.uv ? [{ label: '$(add) Create local environment with uv', description: 'Shared by this folder', action: 'uv' as const }] : []),
+            ...(tools.conda ? [{ label: '$(add) Create local environment with Conda', description: 'Shared by this folder', action: 'conda' as const }] : []),
+            { label: '$(add) Create local environment with Python venv', description: 'Shared by this folder', action: 'venv' },
+        ];
+        const choice = await vscode.window.showQuickPick(choices, { placeHolder: `Set up Python for ${path.basename(root)}` });
+        if (!choice) return;
+        let selected: string | undefined;
+        if (choice.action === 'current') selected = current;
+        else if (choice.action === 'existing') selected = await this.chooseExistingPython(root, manager);
+        else {
+            let base: string | undefined;
+            let version: string | undefined;
+            if (choice.action !== 'conda') {
+                base = await this.chooseExistingPython(root, manager);
+                if (!base) return;
+            } else {
+                version = await vscode.window.showInputBox({ prompt: 'Conda Python version (optional)', placeHolder: 'For example 3.12; leave blank for Conda default' }) || undefined;
+                if (version && !/^\d+(?:\.\d+){0,2}$/.test(version)) throw new Error('Use a Python version such as 3.12.');
+            }
+            const defaultName = choice.action === 'conda' ? '.conda-gds' : '.venv';
+            const name = await vscode.window.showInputBox({ prompt: 'Local environment folder name', value: fs.existsSync(path.join(root, defaultName)) ? `${defaultName}-new` : defaultName, ignoreFocusOut: true });
+            if (!name) return;
+            if (name === '.' || name === '..' || path.basename(name) !== name || /[\\/]/.test(name)) throw new Error('Enter one folder name inside this project.');
+            const target = path.join(root, name);
+            selected = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Creating ${choice.action} environment`, cancellable: true }, async (_progress, token) => {
+                const abort = new AbortController();
+                token.onCancellationRequested(() => abort.abort());
+                const created = await manager.create({ target, manager: choice.action as EnvironmentManager, pythonExecutable: base,
+                    pythonVersion: version, uvExecutable: tools.uv, condaExecutable: tools.conda, timeoutMs: 10 * 60_000, signal: abort.signal });
+                return created.interpreter;
+            });
+        }
+        if (!selected) return;
+        let diagnostics = await this.probe(selected);
+        if (diagnostics.error) throw new Error(`Python check failed: ${diagnostics.error}`);
+        // The interpreter choice is durable even when optional installation is skipped or fails.
+        await this.persistProject(root, file, diagnostics);
+        const install = await vscode.window.showQuickPick([
+            { label: 'Save this Python', description: 'Use installed packages as they are', action: 'none' },
+            { label: 'Install KLayout', description: 'Enable GDS viewing', action: 'klayout' },
+            { label: 'Install KLayout and gdsfactory', description: 'Standard gdsfactory; provenance requires the local fork', action: 'standard' },
+            { label: 'Install KLayout and local gdsfactory fork', description: 'Editable install from a folder you choose', action: 'fork' },
+        ], { placeHolder: `Packages for ${selected}` });
+        if (!install) return;
+        if (install.action !== 'none') {
+            let forkPath: string | undefined;
+            if (install.action === 'fork') {
+                const folders = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, openLabel: 'Choose gdsfactory fork' });
+                forkPath = folders?.[0]?.fsPath;
+                if (!forkPath) return;
+                if (!fs.existsSync(path.join(forkPath, 'pyproject.toml'))) throw new Error('Choose the gdsfactory fork root containing pyproject.toml.');
+            }
+            const packages = install.action === 'klayout' ? ['klayout'] : install.action === 'standard' ? ['klayout', 'gdsfactory'] : ['klayout'];
+            await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Installing GDS Python packages', cancellable: true }, async (_progress, token) => {
+                const abort = new AbortController();
+                token.onCancellationRequested(() => abort.abort());
+                await manager.install({ interpreter: selected!, packages, gdsfactoryForkPath: forkPath, timeoutMs: 15 * 60_000, signal: abort.signal });
+            });
+            diagnostics = await this.probe(selected);
+            if (diagnostics.error) throw new Error(`Python check after installation failed: ${diagnostics.error}`);
+        }
+        await this.persistProject(root, file, diagnostics);
+        const features = [diagnostics.klayout?.path ? 'KLayout' : '', diagnostics.gdsfactory?.path ? 'gdsfactory' : '', diagnostics.provenance?.available ? 'provenance' : ''].filter(Boolean);
+        void vscode.window.showInformationMessage(`GDS Python saved for ${path.basename(root)}. ${features.length ? `Available: ${features.join(', ')}.` : 'No GDS packages detected yet.'}`);
     }
 }

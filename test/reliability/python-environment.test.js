@@ -69,6 +69,11 @@ async function main() {
   assert.equal(scoped.get('python:defaultInterpreterPath:'+project),process.execPath);
   const reopened=new EnvProvider(context,{discover:async()=>[],probe:async()=>checked});
   await reopened.setupProject(file);assert.equal(prompts,1,'valid saved setup must not prompt on reopen');
+  const setupMenus=[];
+  vscode.window.showQuickPick=async items=>{setupMenus.push(items.map(item=>item.action));return items.find(item=>item.action==='current'||item.action==='none');};
+  await reopened.setupProject(file,true);
+  assert.deepEqual(setupMenus.map(menu=>menu.includes('current')||menu.includes('none')),[true,true]);
+  assert.equal(require(path.join(project,'.gds-navigator/environment.json')).version,2);
   const otherProject=fs.mkdtempSync(path.join(os.tmpdir(),'gds-onboarding-declined-'));
   vscode.window.showInformationMessage=async()=> 'Not now';
   await reopened.setupProject(path.join(otherProject,'chip.gds'));

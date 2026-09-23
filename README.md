@@ -150,8 +150,8 @@ returns a nonzero exit code and retains diagnostics. The source files are unchan
 | Provenance generation (sidecars, jump-to-source) | The [fangrh/gdsfactory](https://github.com/fangrh/gdsfactory) fork |
 
 Python selection is automatic by default: the extension checks installed environments
-and prefers one with the provenance-enabled gdsfactory fork and KLayout. It does not
-install packages or modify your fork. Builds, parsing and component previews wait for
+and prefers one with the provenance-enabled gdsfactory fork and KLayout. Automatic
+detection does not install packages. Builds, parsing and component previews wait for
 selection to finish.
 
 Click the Python status-bar item or run `GDS: Select Python Environment` to choose an
@@ -166,16 +166,23 @@ and 24 candidates. Environments in unusual locations can be selected manually.
 ## Usage
 
 On the first GDS open in a folder, **Set up GDS Python** offers a checked environment.
-Choose **Use this environment** or **Choose another**; the selected interpreter is
-verified before it becomes this folder's default. Existing environments are reused;
-setup does not install packages. **Not now** leaves the folder unchanged.
-Run **GDS: Set Up Project Environment** to repeat setup or change the saved default.
+Use the **Set up Python environment** action in the GDS Navigator sidebar, or run
+**GDS: Set Up Project Environment**, for the full setup menu. Choose an installed
+interpreter, including a Conda or system Python, or create a local environment with
+an installed uv or Conda manager or Python's `venv`. uv and Conda choices appear when
+those tools are installed. The local environment folder is chosen during setup and
+must not already exist. After Python is checked, you can save it as-is, install
+KLayout, install KLayout plus standard gdsfactory, or install KLayout plus a local
+editable gdsfactory fork. Package installation targets the selected interpreter.
+Standard gdsfactory does not provide this project's provenance feature.
 
 Setup writes `.gds-navigator/environment.json`, a `gds-python.cmd` launcher, and a
 managed section in `AGENTS.md` linking to the environment guide. Existing agent
 instructions and custom launchers are preserved. On Windows, agents can run
 `.\gds-python.cmd your_script.py`; it uses the selected interpreter and enables
-`GDS_PROVENANCE=1`. Copied selections and newly created work orders also carry the
+`GDS_PROVENANCE=1`. All layouts and scripts under the folder use the same saved
+interpreter; the recorded capabilities show which optional packages were present
+at the last check. Copied selections and newly created work orders also carry the
 exact runtime invocation. Other agents must follow this project entry point; their
 own unrelated shell interpreters are not globally changed. Interpreter paths are
 machine-local: select a checked environment again after moving to another computer.

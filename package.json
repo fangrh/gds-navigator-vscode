@@ -140,7 +140,7 @@
           "scope": "resource",
           "type": "string",
           "default": "",
-          "markdownDescription": "Python executable used to parse GDS files and run build scripts. An explicit path or manually picked environment takes precedence. Otherwise GDS Navigator automatically checks installed environments and prefers verified provenance-enabled gdsfactory with klayout. Use **GDS: Select Python Environment** to choose or return to automatic detection. Detection never installs packages."
+          "markdownDescription": "Python executable used to parse GDS files and run build scripts. An explicit path or manually picked environment takes precedence. Otherwise GDS Navigator automatically checks installed environments and prefers verified provenance-enabled gdsfactory with klayout. Use **GDS: Set Up Project Environment** to choose or create a folder-wide environment and optionally install packages. Automatic detection never installs packages."
         },
         "gdsNavigator.parseTimeoutSec": {
           "type": "number",
@@ -184,9 +184,9 @@
     "test:usage:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js --usage",
     "test:ui": "node test/reliability/eda-workbench.test.js && node test/reliability/shape-properties-viewer.test.js && node test/reliability/manhattan-route-viewer.test.js && node test/reliability/context-menu.test.js && node test/reliability/review-tools-viewer.test.js",
     "test:review": "node test/reliability/layout-review.test.js && node test/reliability/review-store.test.js && node test/reliability/review-provider.test.js && node test/reliability/review-tools-viewer.test.js",
-    "test:environment": "node test/reliability/python-environment.test.js && node test/reliability/project-environment.test.js && node test/reliability/handoff-runtime.test.js",
-    "test:environment:setup": "npm run compile && node test/reliability/vscode-lifecycle.test.js --work-orders --setup-env",
-    "test:environment:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js --work-orders --auto-env",
+    "test:environment": "node test/reliability/python-environment-manager.test.js && node test/reliability/python-environment.test.js && node test/reliability/project-environment.test.js && node test/reliability/handoff-runtime.test.js",
+    "test:environment:setup": "npm run compile && node test/reliability/vscode-lifecycle.test.js --setup-env",
+    "test:environment:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js --auto-env",
     "test:work-orders": "npm run compile && node test/reliability/instruction-queue.test.js && node test/reliability/work-order-queue.test.js && node test/reliability/work-order-tracking.test.js && node test/reliability/work-order-rebuild.test.js && node test/reliability/work-order-cli-tracking.test.js && node test/reliability/instruction-provider.test.js && node test/reliability/work-orders-viewer.test.js && node test/reliability/work-order-selection.test.js",
     "test:work-orders:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js --work-orders"
   },

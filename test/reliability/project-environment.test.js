@@ -7,6 +7,8 @@ const diagnostics={executable:process.execPath,gdsfactory:{path:'test/fork'},kla
 fs.writeFileSync(path.join(temp,'AGENTS.md'),'# Existing guidance\nKeep this.\n');
 saveProjectEnvironment(temp,diagnostics);
 assert.equal(readProjectEnvironment(temp).python,process.execPath);
+assert.equal(readProjectEnvironment(temp).version,2);
+assert.deepEqual(readProjectEnvironment(temp).capabilities,{klayout:true,gdsfactory:true,provenance:true});
 assert(fs.readFileSync(path.join(temp,'AGENTS.md'),'utf8').startsWith('# Existing guidance'));
 saveProjectEnvironment(temp,diagnostics);
 assert.equal(fs.readFileSync(path.join(temp,'AGENTS.md'),'utf8').split('<!-- gds-navigator-environment:start -->').length,2);
@@ -18,12 +20,13 @@ if(process.platform==='win32'){
  const cmdOutput=cp.execFileSync('cmd.exe',['/d','/s','/c',`""${path.join(temp,'gds-python.cmd')}" "${check}" --out "argument with spaces""`],{encoding:'utf8',windowsHide:true,windowsVerbatimArguments:true});
  assert.deepEqual(JSON.parse(cmdOutput.trim()).args,['--out','argument with spaces']);
 }
-const before=fs.readFileSync(path.join(temp,'.gds-navigator/environment.json'),'utf8');
-assert.throws(()=>saveProjectEnvironment(temp,{...diagnostics,provenance:{available:false}}));
-assert.equal(fs.readFileSync(path.join(temp,'.gds-navigator/environment.json'),'utf8'),before);
+saveProjectEnvironment(temp,{executable:process.execPath});
+assert.deepEqual(readProjectEnvironment(temp).capabilities,{klayout:false,gdsfactory:false,provenance:false});
+assert.throws(()=>saveProjectEnvironment(temp,{...diagnostics,error:'not Python'}));
+assert.equal(readProjectEnvironment(temp).capabilities.provenance,false);
 fs.writeFileSync(path.join(temp,'gds-python.cmd'),'custom user launcher');
 assert.throws(()=>saveProjectEnvironment(temp,diagnostics),/custom file/);
 assert.equal(fs.readFileSync(path.join(temp,'gds-python.cmd'),'utf8'),'custom user launcher');
 const other=fs.mkdtempSync(path.join(os.tmpdir(),'gds-env-other-'));saveProjectEnvironment(other,{...diagnostics,gdsfactory:{path:'other/fork'}});
-assert.equal(readProjectEnvironment(temp).gdsfactory,'test/fork');assert.equal(readProjectEnvironment(other).gdsfactory,'other/fork');
+assert.equal(readProjectEnvironment(temp).gdsfactory,undefined);assert.equal(readProjectEnvironment(other).gdsfactory,'other/fork');
 console.log(JSON.stringify({status:'passed',agentGuidePreserved:true,argvAndEnvironment:true,customFilesProtected:true,folderIsolation:true}));
