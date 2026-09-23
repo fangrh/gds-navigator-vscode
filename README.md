@@ -7,6 +7,20 @@ GDS editor) into VS Code. The web app's Monaco editor, terminal and file tree
 are dropped; VS Code itself provides those. What remains is the layout viewer,
 the provenance navigation, the script runner and the image-registration tool.
 
+## Start a project
+
+Open a folder in VS Code and click the **GDS Navigator** icon in the Activity
+Bar. Choose **Initialize project** to create `scripts/`, `layouts/`, `images/`
+and `GDS_START_HERE.md`. Choose **Create marker template (50 µm JJ pad)** to
+copy your 50 µm JJ pad Python generator and the matching fixture GDS into the
+new project. With the
+folder open, the GDS opens immediately and the Python script is ready for
+editing. Existing files are never overwritten.
+
+The sidebar also offers **Set up Python environment** and **Run current Python
+script**. The example GDS can be viewed before Python setup. Regenerating it
+requires gdsfactory; a compatible provenance-enabled fork adds source links.
+
 ## Features
 
 ### Layout viewer

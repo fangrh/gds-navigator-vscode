@@ -13,9 +13,36 @@
     "Visualization",
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onView:gdsNavigator.start",
+    "onCommand:gdsNavigator.initializeProject",
+    "onCommand:gdsNavigator.createMarkerExample"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gdsNavigator",
+          "title": "GDS Navigator",
+          "icon": "media/gds-navigator-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "gdsNavigator": [
+        {
+          "id": "gdsNavigator.start",
+          "name": "Start"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "gdsNavigator.start",
+        "contents": "Start or continue a GDS project.\n[Initialize project](command:gdsNavigator.initializeProject)\n[Create marker template (50 µm JJ pad)](command:gdsNavigator.createMarkerExample)\n[Set up Python environment](command:gdsNavigator.setupProjectEnvironment)\n[Run current Python script](command:gdsNavigator.runScript)"
+      }
+    ],
     "customEditors": [
       {
         "viewType": "gdsNavigator.viewer",
@@ -29,6 +56,14 @@
       }
     ],
     "commands": [
+      {
+        "command": "gdsNavigator.initializeProject",
+        "title": "GDS: Initialize Project"
+      },
+      {
+        "command": "gdsNavigator.createMarkerExample",
+        "title": "GDS: Create Marker Template (50 µm JJ Pad)"
+      },
       {
         "command": "gdsNavigator.selectPythonEnv",
         "title": "GDS: Select Python Environment"
@@ -131,7 +166,8 @@
     "test:alignment:quick": "node test/alignment/numbered-markers.test.js",
     "test:alignment:legacy": "node test/alignment/run-tests.js",
     "test:alignment:viewer": "node test/alignment/numbered-viewer.test.js",
-    "test:reliability": "node test/reliability/selection.test.js && node test/reliability/build-contract.test.js && node test/reliability/provenance-contract.test.js && node test/reliability/viewer-instructions.test.js && node test/reliability/provider-contract.test.js && node test/reliability/primitives.test.js && node test/reliability/primitives-viewer.test.js",
+    "test:reliability": "node test/reliability/selection.test.js && node test/reliability/build-contract.test.js && node test/reliability/provenance-contract.test.js && node test/reliability/viewer-instructions.test.js && node test/reliability/provider-contract.test.js && node test/reliability/primitives.test.js && node test/reliability/primitives-viewer.test.js && node test/reliability/starter-project.test.js",
+    "test:starter": "node test/reliability/starter-project.test.js",
     "test:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js",
     "test:conditions": "node test/reliability/working-conditions.test.js",
     "test:alignment:random100": "python test/alignment/generate-random-corpus.py && node test/alignment/random-corpus.test.js",
