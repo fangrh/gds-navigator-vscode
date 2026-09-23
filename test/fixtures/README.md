@@ -35,7 +35,7 @@ the author's project archive and are not distributed here.
 ## Automated tests
 
 ```bash
-npm test          # full suite (~90 s): needs Edge or Chrome on the machine
+npm test          # core alignment and reliability checks; needs Edge or Chrome
 npm run test:alignment:quick   # fast subset for iteration
 ```
 

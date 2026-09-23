@@ -18,6 +18,13 @@ scripts/_viewer_check.js
 
 logs/
 
+# Generated maps, local agent state, and test output
+.artifacts/
+.zcode/
+**/__pycache__/
+test/alignment/out/
+tmp-*.cjs
+
 # Curated acceptance inputs required by the reproducible tests
 !test/fixtures/electrode100-microscope.png
 !test/fixtures/electrode100-reduced.png
