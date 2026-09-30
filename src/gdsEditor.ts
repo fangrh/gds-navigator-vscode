@@ -5,13 +5,14 @@ import { createHash } from 'crypto';
 import { UsageLog, UsageFields, hashDocument } from './usageLog';
 import { AutomaticUsageReport } from './automaticUsageReport';
 import { parseGdsFile } from './parseGds';
+import { createSourceResolver, annotationChanges } from './loadPerformance';
 import { findSidecar, deriveScriptFromSidecar } from './sidecar';
 import { openSource } from './jumpToSource';
 import { runPythonScript, RunResult } from './pythonRunner';
 import { linkedScript, updateBuildLinks, linkScript, relatedLayouts } from './fileLinks';
 import { ProjectStore } from './projectStore';
 import { InstructionQueue } from './instructionQueue';
-import { loadComponentCatalog, previewComponent } from './componentCatalog';
+import { loadComponentCatalog, previewComponent, requestComponentThumbnails } from './componentCatalog';
 import { writeToClipboard } from './clipboardUtil';
 import { EnvProvider, inspectPython } from './envProvider';
 import { elementId, selectionDocument, toYaml, validateAnnotations, HandoffOptions } from './selectionExport';
@@ -117,6 +118,7 @@ interface ViewerEntry {
     instructionWrites?: Promise<void>;
     snapshotReady?: boolean;
     catalogController?: AbortController;
+    thumbnailController?: AbortController;
     reviewState?: ReviewState;
     reviewStateInvalid?: boolean;
 }
@@ -252,6 +254,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
             entry.disposed = true;
             entry.parseController?.abort();
             entry.catalogController?.abort();
+            entry.thumbnailController?.abort();
             if (this.activeEntry === entry) { this.activeEntry = undefined; this.activeGdsPath = undefined; this.env.setActiveFile?.(undefined); }
             const remaining = (this.viewers.get(gdsPath) || []).filter((v) => v !== entry);
             if (remaining.length) {
@@ -290,6 +293,23 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
         console.log('[gds-navigator] msg:', message && message.type);
         this.output.appendLine(`[msg] ${message && message.type} (yaml ${typeof (message && message.yaml) === 'string' ? message.yaml.length : '-'})`);
         switch (message.type) {
+            case 'requestComponentThumbnails': {
+                entry.thumbnailController?.abort();
+                const controller = new AbortController(); entry.thumbnailController = controller;
+                const started = Date.now(); this.recordUsage(entry, 'catalog.thumbnails', { phase: 'intent' });
+                try {
+                    await this.env.ready?.(entry.gdsPath);
+                    if (controller.signal.aborted || entry.disposed) return;
+                    const projectRoot = vscode.workspace.isTrusted ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(entry.gdsPath))?.uri.fsPath : undefined;
+                    const result = await requestComponentThumbnails(this.env.getPython(entry.gdsPath), message.names, controller.signal, projectRoot);
+                    this.recordUsage(entry, 'catalog.thumbnails', { phase: 'result', outcome: controller.signal.aborted || entry.disposed ? 'cancelled' : 'success', durationMs: Date.now() - started });
+                    if (!entry.disposed && entry.thumbnailController === controller) await entry.panel.webview.postMessage({ type: 'componentThumbnails', requestId: message.requestId, result });
+                } catch (error: any) {
+                    this.recordUsage(entry, 'catalog.thumbnails', { phase: 'result', outcome: controller.signal.aborted ? 'cancelled' : 'failure', durationMs: Date.now() - started });
+                    if (!entry.disposed && entry.thumbnailController === controller) await entry.panel.webview.postMessage({ type: 'componentError', requestId: message.requestId, error: error.message });
+                }
+                break;
+            }
             case 'requestComponentCatalog':
             case 'previewComponent': {
                 entry.catalogController?.abort();
@@ -299,9 +319,13 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
                 try {
                     await this.env.ready?.(entry.gdsPath);
                     if (controller.signal.aborted || entry.disposed) return;
+                    const projectRoot = vscode.workspace.isTrusted ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(entry.gdsPath))?.uri.fsPath : undefined;
                     const result = message.type === 'requestComponentCatalog'
-                        ? await loadComponentCatalog(this.env.getPython(entry.gdsPath), controller.signal)
-                        : await previewComponent(this.env.getPython(entry.gdsPath), message.name, message.settings, controller.signal);
+                        ? await loadComponentCatalog(this.env.getPython(entry.gdsPath), controller.signal, projectRoot)
+                        : await previewComponent(this.env.getPython(entry.gdsPath), message.name, message.settings, controller.signal, projectRoot);
+                    if (message.type === 'requestComponentCatalog' && !vscode.workspace.isTrusted) {
+                        (result as any).warnings = [...((result as any).warnings || []), 'Trust this workspace to load project components from gds_components.py.'];
+                    }
                     this.recordUsage(entry, usageAction, { phase: 'result', outcome: controller.signal.aborted || entry.disposed ? 'cancelled' : 'success', durationMs: Date.now() - started });
                     if (!entry.disposed && entry.catalogController === controller) await entry.panel.webview.postMessage({ type: message.type === 'requestComponentCatalog' ? 'componentCatalog' : 'componentPreview', requestId: message.requestId, result });
                 } catch (error: any) {
@@ -388,8 +412,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
                         const before = this.state.get<any[]>(this.annotationKey(entry.gdsPath), []) || [];
                         if (message.recordInstruction && JSON.stringify(before) !== JSON.stringify(message.annotations)) {
                             const q = this.queueFor(entry); q.reload();
-                            const changed = message.annotations.filter((a: any) => JSON.stringify(a) !== JSON.stringify(before.find(b => b.id === a.id)));
-                            const removed = before.filter(a => !message.annotations.some((b: any) => b.id === a.id));
+                            const { changed, removed } = annotationChanges<any>(before, message.annotations);
                             const components = [...changed, ...removed].map((a: any) => ({ provId: a.id, drawn: true, geometry: a.geometry, primitive: a.primitive, factory: a.factory, route: a.route, layer: a.primitive?.layer || a.layer, intent: { ...a.intent, ...(removed.includes(a) ? { action: 'delete', text: 'Remove this proposal; review whether it has already been implemented.' } : {}) } }));
                             const selected = (message.components || []).filter((c: any) => !c.drawn);
                             const record = q.add({ gdsPath: entry.gdsPath, gdsHash: entry.gdsHash, generatingScript: this.resolveScriptFor(entry.gdsPath), topCell: entry.topCell,
@@ -710,20 +733,19 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
             entry.gdsHash = gdsHash;
             entry.lastSelection = [];
             entry.topCell = (geojson as any).top_cell;
+            const resolveReference = createSourceResolver([path.dirname(entry.gdsPath), vscode.workspace.getWorkspaceFolder(vscode.Uri.file(entry.gdsPath))?.uri.fsPath].filter(Boolean) as string[]);
             (geojson as any).features.forEach((f: any, i: number) => {
                 f.properties = f.properties || {}; f.properties.element_id = elementId(f, i);
-                const resolveReference = (reference: any) => {
-                    if (!reference?.file || typeof reference.file !== 'string') { return; }
-                    const roots = [path.dirname(entry.gdsPath), vscode.workspace.getWorkspaceFolder(vscode.Uri.file(entry.gdsPath))?.uri.fsPath].filter(Boolean) as string[];
-                    const candidates = path.isAbsolute(reference.file) ? [reference.file] : roots.map(root => path.resolve(root, reference.file));
-                    const existing = [...new Set(candidates)].filter(file => { try { return fs.statSync(file).isFile(); } catch { return false; } });
-                    reference.resolved_file = existing.length === 1 ? existing[0] : undefined;
-                    reference.source_resolution = existing.length === 1 ? 'resolved_location' : existing.length ? 'ambiguous' : 'unavailable';
-                };
                 resolveReference(f.properties.provenance);
                 if (Array.isArray(f.properties.provenance?.call_chain)) { f.properties.provenance.call_chain.forEach(resolveReference); }
             });
             entry.elementCatalog = (geojson as any).features.map((f: any) => ({ provId: f.properties.element_id, layer: f.properties.layer + '/' + f.properties.data_type, bbox: f.properties.bbox, geometry: f.geometry, provenance: f.properties.provenance || {} }));
+            for (const port of Array.isArray((geojson as any).ports) ? (geojson as any).ports : []) {
+                if (port.coordinate_frame !== 'layout' || !Array.isArray(port.center) || port.center.length !== 2 || !port.center.every(Number.isFinite)) continue;
+                entry.elementCatalog!.push({ provId: port.id, layer: Array.isArray(port.layer) ? port.layer.join('/') : String(port.layer || ''),
+                    bbox: [port.center[0], port.center[1], port.center[0], port.center[1]],
+                    geometry: { type: 'Point', coordinates: port.center }, provenance: port.provenance || {}, port });
+            }
             await this.workspaceWrites?.catch(() => undefined);
             const savedReview = this.state.get<ReviewState>(this.reviewKey(entry.gdsPath));
             entry.reviewStateInvalid = savedReview !== undefined && !validateReviewState(savedReview);
@@ -1159,7 +1181,8 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
         try {
             if ((entry.loading && !entry.snapshotReady) || entry.disposed) { throw new Error('Layout is loading. Wait before copying the selection.'); }
             if (!Array.isArray(entry.lastSelection) || !entry.lastSelection.length) { throw new Error('Select an element or annotation first.'); }
-            const document = selectionDocument(entry.gdsPath, entry.gdsHash, entry.lastSelection, entry.topCell, { request, catalog: entry.elementCatalog, generatingScript: this.resolveScriptFor(entry.gdsPath), runtime: this.runtimeFor(entry) });
+            const factoryPorts = entry.lastSelection.filter((c: any) => c?.port?.source === 'factory');
+            const document = selectionDocument(entry.gdsPath, entry.gdsHash, entry.lastSelection, entry.topCell, { request, catalog: [...(entry.elementCatalog || []), ...factoryPorts], generatingScript: this.resolveScriptFor(entry.gdsPath), runtime: this.runtimeFor(entry) });
             const text = toYaml(document) + '\n';
             const copy = this.clipboardWrites.catch(() => undefined).then(async () => {
             if ((entry.loading && !entry.snapshotReady) || entry.disposed || entry.gdsHash !== document.document.sha256) { throw new Error('Layout changed before copying. Select the elements again.'); }
@@ -1240,6 +1263,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
         for (const dispose of this.instructionWatchers.values()) dispose();
         this.instructionWatchers.clear();
         for (const entries of this.viewers.values()) for (const entry of entries) entry.catalogController?.abort();
+        for (const entries of this.viewers.values()) for (const entry of entries) entry.thumbnailController?.abort();
         for (const list of this.watchers.values()) { list.forEach(w => w.dispose()); }
         this.watchers.clear();
         for (const list of this.viewers.values()) { list.forEach(v => v.parseController?.abort()); }
@@ -1300,6 +1324,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
             .replace('__PROPERTIES_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'shape-properties.js'))}"></script>`)
             .replace('__CHOOSER_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'component-chooser.js'))}"></script>`)
             .replace('__PRIMITIVE_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'layout-primitives.js'))}"></script>`)
+            .replace('__PORT_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'port-overlay.js'))}"></script>`)
             .replace('__OL_CSS__', `<link rel="stylesheet" href="${olCss}">`)
             .replace('__OL_JS__', `<script src="${olJs}"></script>`)
             .replace('<head>', `<head>\n<meta http-equiv="Content-Security-Policy" content="${csp}">`);

@@ -20,24 +20,14 @@
         return !!d && typeof d==='object' && ['image','contours','image-contours'].indexOf(d.mode)>=0 && Number.isInteger(d.threshold) && d.threshold>=1 && d.threshold<=255 &&
             typeof d.color==='string' && /^#[0-9a-fA-F]{6}$/.test(d.color) && Number.isInteger(d.width) && d.width>=1 && d.width<=4 && typeof d.border==='boolean';
     }
-    function drawDisplay(warped,ow,oh,d,borderMask) {
+    function drawDisplay(warped,ow,oh,d,borderMask,contourMask) {
         if (d.mode==='image' && !d.border) return warped;
         const out=new Uint8ClampedArray(warped), rgb=colorRgb(d.color), radius=d.width-1;
-        const lum=(i)=>((warped[i]*299+warped[i+1]*587+warped[i+2]*114)/1000);
         function edgeAt(x,y) {
             const i=4*(y*ow+x); if (warped[i+3]===0) return false;
             if (d.border && borderMask[y*ow+x]) return true;
             if (d.mode==='image') return false;
-            let gx=0,gy=0;
-            let hasTransparent=false;
-            for(let ky=-1;ky<=1;ky++)for(let kx=-1;kx<=1;kx++) {
-                const xx=Math.max(0,Math.min(ow-1,x+kx)), yy=Math.max(0,Math.min(oh-1,y+ky)), ni=4*(yy*ow+xx);
-                if(warped[ni+3]===0) { hasTransparent=true; continue; }
-                const weight=(kx===0?0:kx)*(ky===0?2:1); gx+=lum(ni)*weight;
-                const yweight=(ky===0?0:ky)*(kx===0?2:1); gy+=lum(ni)*yweight;
-            }
-            if (hasTransparent) return false;
-            return Math.hypot(gx,gy)>=d.threshold;
+            return contourMask[y*ow+x] !== 0;
         }
         if (d.mode==='contours') out.fill(0);
         for(let y=0;y<oh;y++)for(let x=0;x<ow;x++)if(edgeAt(x,y)) {
@@ -48,6 +38,21 @@
             }
         }
         return out;
+    }
+    function contourMaskFor(warped,ow,oh,threshold) {
+        const mask=new Uint8Array(ow*oh),lum=(i)=>((warped[i]*299+warped[i+1]*587+warped[i+2]*114)/1000);
+        for(let y=0;y<oh;y++)for(let x=0;x<ow;x++) {
+            const i=4*(y*ow+x); if(warped[i+3]===0) continue;
+            let gx=0,gy=0,hasTransparent=false;
+            for(let ky=-1;ky<=1;ky++)for(let kx=-1;kx<=1;kx++) {
+                const xx=Math.max(0,Math.min(ow-1,x+kx)), yy=Math.max(0,Math.min(oh-1,y+ky)), ni=4*(yy*ow+xx);
+                if(warped[ni+3]===0) { hasTransparent=true; continue; }
+                const weight=(kx===0?0:kx)*(ky===0?2:1); gx+=lum(ni)*weight;
+                const yweight=(ky===0?0:ky)*(kx===0?2:1); gy+=lum(ni)*yweight;
+            }
+            if (!hasTransparent && Math.hypot(gx,gy)>=threshold) mask[y*ow+x]=1;
+        }
+        return mask;
     }
     function render(image,state) {
         const w=image.naturalWidth,h=image.naturalHeight,H=transform(state,w,h),key=JSON.stringify(H);
@@ -70,7 +75,7 @@
                 if(x0<0||y0<0||x0+1>=w||y0+1>=h)continue;
                 for(let ch=0;ch<4;ch++)dst[4*(y*ow+x)+ch]=(1-fy)*((1-fx)*src[4*(y0*w+x0)+ch]+fx*src[4*(y0*w+x0+1)+ch])+fy*((1-fx)*src[4*((y0+1)*w+x0)+ch]+fx*src[4*((y0+1)*w+x0+1)+ch]);
             }
-            entry.warped=dst;entry.borderMask=null;entry.warpedWidth=ow;entry.warpedHeight=oh;
+            entry.warped=dst;entry.borderMask=null;entry.contourMask=null;entry.contourMaskThreshold=null;entry.warpedWidth=ow;entry.warpedHeight=oh;
         }
         if(d.border&&!entry.borderMask){
             const points=corners.map(p=>[(p[0]-extent[0])*ow/(extent[2]-extent[0]),(extent[3]-p[1])*oh/(extent[3]-extent[1])]);
@@ -85,7 +90,10 @@
             }
             entry.borderMask=mask;
         }
-        const canvas=document.createElement('canvas');canvas.width=ow;canvas.height=oh;const ctx=canvas.getContext('2d'),dst=ctx.createImageData(ow,oh);dst.data.set(drawDisplay(entry.warped,ow,oh,d,entry.borderMask));ctx.putImageData(dst,0,0);
+        if((d.mode==='contours'||d.mode==='image-contours')&&(!entry.contourMask||entry.contourMaskThreshold!==d.threshold)){
+            entry.contourMask=contourMaskFor(entry.warped,ow,oh,d.threshold);entry.contourMaskThreshold=d.threshold;
+        }
+        const canvas=document.createElement('canvas');canvas.width=ow;canvas.height=oh;const ctx=canvas.getContext('2d'),dst=ctx.createImageData(ow,oh);dst.data.set(drawDisplay(entry.warped,ow,oh,d,entry.borderMask,entry.contourMask));ctx.putImageData(dst,0,0);
         entry.key=key;entry.displayKey=displayKey;entry.output={canvas,extent,transform:H,url:canvas.toDataURL('image/png')};cache.set(image,entry);return entry.output;
     }
     function serialize(state) {

@@ -226,10 +226,18 @@ async function main(){
          await until(()=>frame.evaluate(()=>microImg?.quality?.status==='aligned'));
          await sleep(500); // Allow prior layout fit animations to settle before checking restored pixels.
          assert(await frame.evaluate(()=>microLayer.getZIndex()<(vectorLayer.getZIndex()||0)));
-         await until(()=>frame.evaluate(()=>{
+         try { await until(()=>frame.evaluate(()=>{
            if(!Number.isFinite(map.getView().getResolution()))return false;
-           for(const c of document.querySelectorAll('.ol-layer canvas')){const ctx=c.getContext('2d');if(!ctx)continue;const d=ctx.getImageData(0,0,c.width,c.height).data;let green=0;for(let n=0;n<d.length;n+=32){if(d[n]<150&&d[n+1]>180&&d[n+2]<150&&d[n+3]>128)green++;}if(green>400)return true;}return false;
-         }));
+           for(const c of document.querySelectorAll('.ol-layer canvas')){const ctx=c.getContext('2d');if(!ctx)continue;const d=ctx.getImageData(0,0,c.width,c.height).data;let green=0;for(let n=0;n<d.length;n+=32){if(d[n]<150&&d[n+1]>180&&d[n+2]<150&&d[n+3]>128)green++;}if(green>Math.max(30,Math.min(400,c.width*c.height/500)))return true;}return false;
+         })); } catch (error) {
+           fs.writeFileSync(path.join(output,`image-render-diagnostic-cycle-${cycle+1}.json`),JSON.stringify(await frame.evaluate(()=>({
+             image:microImg&&{cx:microImg.cx,cy:microImg.cy,quality:microImg.quality,visible:microImg.visible,opacity:microImg.opacity,display:microImg.display},
+             mapSize:map.getSize(),resolution:map.getView().getResolution(),layerExtent:microLayer?.getSource()?.getImageExtent(),
+             canvases:[...document.querySelectorAll('.ol-layer canvas')].map(c=>({width:c.width,height:c.height})),
+           })),null,2));
+           await frame.page().screenshot({path:path.join(output,`image-render-diagnostic-cycle-${cycle+1}.png`)});
+           throw error;
+         }
        }
        if(usageMode&&i===0){
          const automaticPath=path.join(workspace,'.gds-navigator','usage-report.json');

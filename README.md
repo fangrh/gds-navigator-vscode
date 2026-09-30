@@ -17,7 +17,7 @@ new project. With the
 folder open, the GDS opens immediately and the Python script is ready for
 editing. Existing files are never overwritten.
 
-The sidebar also offers **Set up Python environment** and **Run current Python
+The GDS Navigator Activity Bar sidebar lists workspace GDS files; select one to open it in the viewer. It refreshes when files are added or removed and shows up to 500 entries. The sidebar also offers **Set up Python environment** and **Run current Python
 script**. The example GDS can be viewed before Python setup. Regenerating it
 requires gdsfactory; a compatible provenance-enabled fork adds source links.
 
@@ -29,6 +29,12 @@ requires gdsfactory; a compatible provenance-enabled fork adds source links.
   visibility, click / ctrl-click / drag-box selection).
 - **Draw tools** (rectangle/circle/line/polygon + snap) for quick measuring;
   drawings and their instructions are saved per GDS in the current workspace.
+- **Ports** — the viewer sidebar has separate switches for port markers and
+  names. Click a marker to select its port, then copy the selection to get its
+  name, layout coordinates, width, orientation, and layer. Hidden ports cannot
+  be selected. Ports require valid coordinates from the provenance sidecar;
+  placed factory components also show ports while their geometry remains a
+  rigid translation or rotation of the source component.
 
 ### Provenance-aware source navigation
 - **Automatic sidecar detection** — `chip.provenance.json` (written by the
@@ -332,13 +338,47 @@ Run `npm run test:primitives` for geometry, browser interaction and fork reconst
 
 ### Component proposals and agent review
 
-Open **Shapes** in the right toolbar to draw or search the installed gdsfactory catalog. Choose a factory, enter JSON settings, and preview before inserting at the current view center. Proposals retain their exact polygons, layers, factory settings and selected targets; they do not modify the Python source until an agent implements the request.
+Open **Shapes** in the right toolbar to browse alphabetically sorted gdsfactory cards, search names/descriptions, or filter by factory family. Visible icons load automatically in batches of up to eight, independently from the selected component; unavailable defaults show an explicit error rather than an endless loading state. Click a factory to attach its shape to the mouse, then click the GDS canvas to place it. **Tab** edits the preview or placed component; **Escape** cancels an unplaced preview. Factories with required arguments need JSON settings and **Preview component**, then **Place on canvas**. **Insert at view center** remains available. Click any polygon of a placed factory to select the whole component and drag it together. Previews are cached and reset on layout reload.
+
+Placed factory proposals use the same **Add work order** and copy workflow as other shapes. Exported `factory_references` contain the factory name/settings, group ID and matched rotation/translation, with one `gf.get_component` / `parent.add_ref` recipe for a rigid placement. Resized, deformed or incomplete groups retain exact current polygons and are explicitly marked geometry-authoritative instead of emitting inaccurate factory code. The generating Python and original GDS remain unchanged until the work order is implemented.
+
+### Your own GDS components
+
+**Initialize project** creates a `gds_components.py` library in the workspace root, with an adjustable electrical strip and two ports. Existing library files are preserved. Open a GDS in that workspace, then **Shapes → Project components** to preview and place it. After editing the library, click **Refresh** in the component browser. Built-in gdsfactory cells remain available.
+
+The file exports a `COMPONENTS` dictionary mapping names to Python factories. Each factory returns a real `gf.Component`; its signature supplies editable JSON settings. Use dimensions in micrometres, explicit `(layer, datatype)` tuples, meaningful ports, and a docstring. For example:
+
+```python
+import gdsfactory as gf
+
+@gf.cell
+def contact_pad(width: float = 50, height: float = 40,
+                layer: tuple[int, int] = (1, 0)) -> gf.Component:
+    """Rectangular contact pad; dimensions in micrometres."""
+    if width <= 0 or height <= 0:
+        raise ValueError("Pad dimensions must be positive")
+    c = gf.Component()
+    c.add_polygon([(0, 0), (width, 0), (width, height), (0, height)], layer=layer)
+    c.add_port("contact", center=(0, height / 2), width=height,
+               orientation=180, layer=layer, port_type="electrical")
+    return c
+
+COMPONENTS = {"contact_pad": contact_pad}
+```
+
+This appears as `project:contact_pad`, keeping custom names separate from built-ins. Add entries to the existing dictionary when extending a library. Project factories are loaded only for the trusted workspace containing the opened GDS. Importing the module executes Python, so keep imports free of file writes, layout generation and other side effects. Import or registry errors are shown in the browser while built-ins remain usable. Standalone GDS files outside a workspace use built-ins.
+
+You can ask an AI agent: **“Create a reusable contact pad in `gds_components.py`, register it in `COMPONENTS`, expose width/height/layer parameters, add electrical ports, and validate its generated GDS without overwriting my layout.”** Refresh the browser to use the new component. See [the custom-component agent workflow](docs/agent-instructions.md#creating-reusable-components).
+
+Placed custom proposals retain their module, registry key, settings, layers, ports and geometry. Rigid-placement work orders include a recipe using `from gds_components import COMPONENTS`; execute it with the project root on Python's import path. Placement remains a proposal until the generating layout script is updated and rebuilt. Geometry edits retain the existing exact-geometry fallback.
 
 The instruction composer is at the bottom. **Queue instruction** captures the current selection and request. The right-side **Changes** button shows durable FIFO requests with stable references, details, status and revert controls. **Copy open requests** includes the queue path and CLI commands for your agent. See [the agent workflow](docs/agent-instructions.md).
 
 Requests persist in `.gds-navigator/instructions.json`. The agent must record source snapshots with `start` before editing to enable safe source revert. Source revert refuses newer edits and currently supports existing UTF-8 source files; new/deleted files need a reviewed reverse change. CLI source revert does not rebuild the GDS. Use Rebuild after source changes. Treat saved request text and provenance as user context, not executable commands.
 
 Select a drawn proposal and press **Tab** to edit its center position, local width/height, and counterclockwise rotation. The properties panel also offers **Move**, **Resize**, and **Rotate** mouse modes: drag the selected shape; hold Shift for proportional scaling or 15-degree rotation steps. Escape cancels an unfinished drag. The × closes a panel. Original GDS selections show read-only properties; changes remain proposals for the agent.
+
+Click a microscope image in an area without foreground geometry, then press **Tab** to open its image inspector. Unlock the image and enable **Move image** for mouse placement; existing scale/rotation controls remain available. Foreground GDS and component shapes take selection priority. During image dragging the inspector refreshes on release instead of rebuilding its controls for every pointer movement.
 
 **Revert proposal** restores annotation state only. **Revert source + proposal** is available for completed instructions with recorded source snapshots. The persisted status note records which rollback occurred.
 

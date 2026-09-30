@@ -13,11 +13,16 @@ logs/**
 .zcode/**
 backlog/**
 research/**
+skills/**
 AGENTS.md
 CONTRACT.md
 ISSUES.md
 routes.yaml
+RESEARCH_MAP.md
 tmp-*.cjs
+.project-components-*/**
+.project-components-*.cjs
+.broken-components-*/**
 esbuild*.mjs
 tsconfig.json
 webview/*.ts

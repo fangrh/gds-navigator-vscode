@@ -9,6 +9,13 @@ This folder has three places to start:
 - \`layouts/\`: generated GDS files to inspect in GDS Navigator.
 - \`images/\`: microscope images you choose to add.
 
+\`gds_components.py\` is your reusable component library. Open **Shapes** and
+filter **Project components** to place the example strip. After you or an AI
+agent adds a factory to its \`COMPONENTS\` dictionary, click **Refresh** in
+the component browser. Each factory returns a real gdsfactory Component with
+geometry, layers and ports. Project components require a trusted workspace.
+Keep imports free of file writes and layout-building side effects.
+
 In the GDS Navigator sidebar, choose **Create marker template (50 µm JJ pad)**
 to add \`scripts/generate_jj_pad_center_50.py\` and
 \`layouts/jj_pad_center_50_test.gds\`. Open the GDS immediately, or edit the
@@ -19,6 +26,32 @@ the interpreter and enables source provenance when a compatible fork is installe
 The template contains the user's numbered marker grid and a 50 µm JJ pad.
 Align microscope images using the numbered markers; electrode or background
 shapes are not registration evidence.
+`;
+
+const COMPONENT_LIBRARY = `"""Project GDS components: register AI-written factories in COMPONENTS.
+
+Keep module imports free of file writes and layout generation. Factories return
+gf.Component and expose JSON-compatible parameters in micrometres.
+"""
+import gdsfactory as gf
+
+
+@gf.cell
+def electrical_strip(length: float = 20.0, width: float = 2.0,
+                     layer: tuple[int, int] = (1, 0)) -> gf.Component:
+    """Electrical strip with two ports; dimensions are in micrometres."""
+    if length <= 0 or width <= 0:
+        raise ValueError("length and width must be positive")
+    c = gf.Component()
+    c.add_polygon([(0, 0), (length, 0), (length, width), (0, width)], layer=layer)
+    c.add_port("e1", center=(0, width / 2), width=width, orientation=180,
+               layer=layer, port_type="electrical")
+    c.add_port("e2", center=(length, width / 2), width=width, orientation=0,
+               layer=layer, port_type="electrical")
+    return c
+
+
+COMPONENTS = {"electrical_strip": electrical_strip}
 `;
 
 export interface StarterProjectResult { guide: string; created: string[]; }
@@ -41,6 +74,10 @@ export function initializeGdsProject(root: string): StarterProjectResult {
     try { fs.writeFileSync(guide, GUIDE, { encoding: 'utf8', flag: 'wx' }); created.push(guide); }
     catch (error: any) { if (error?.code !== 'EEXIST') throw error; }
     if (!fs.statSync(guide).isFile()) throw new Error('GDS_START_HERE.md exists and is not a file.');
+    const library = path.join(resolved, 'gds_components.py');
+    try { fs.writeFileSync(library, COMPONENT_LIBRARY, { encoding: 'utf8', flag: 'wx' }); created.push(library); }
+    catch (error: any) { if (error?.code !== 'EEXIST') throw error; }
+    if (!fs.statSync(library).isFile()) throw new Error('gds_components.py exists and is not a file.');
     return { guide, created };
 }
 

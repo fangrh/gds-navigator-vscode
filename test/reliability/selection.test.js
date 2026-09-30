@@ -22,5 +22,40 @@ assert.equal(elementId({geometry,properties:{layer:1,provenance:{file:'old.py'}}
 assert(validateAnnotations([{id:'draw',geometry}]));
 assert(!validateAnnotations([{id:'draw',geometry},{id:'draw',geometry}]));
 assert(!validateAnnotations([{id:'draw',geometry:{type:'Circle',center:[0,0],radius:NaN}}]));
+
+const port={id:'port-1',name:'optical_in',center:[9.75,20],width:0.5,orientation:90,layer:[1,0],coordinate_frame:'layout',source:'gds'};
+const portComponent={provId:port.id,layer:'1/0',geometry:{type:'Point',coordinates:port.center},bbox:[9.75,20,9.75,20],port,provenance:{cell:'TOP'}};
+const portDoc=selectionDocument('chip.gds','hash',[portComponent],'TOP',{catalog:[portComponent],request:{action:'inspect',text:'',targetIds:[port.id],snapshot:'hash',documentPath:'chip.gds'}});
+assert.deepEqual(portDoc.elements[0].port,port);
+assert.deepEqual(JSON.parse(cp.execFileSync('python',['-c','import sys,yaml,json; print(json.dumps(yaml.safe_load(sys.stdin.read())))'],{input:toYaml(portDoc),encoding:'utf8'})).elements[0].port.center,port.center);
+assert(!portDoc.validation?.issues?.some(issue=>issue.code==='unresolved_target'));
+
+// Factory groups export one safe reference when every source polygon shares a rigid pose.
+const rotate = (ring, deg, origin, offset) => ring.map(([x,y]) => { const a=deg*Math.PI/180, c=Math.cos(a), s=Math.sin(a); return [c*x-s*y+origin[0]+offset[0], s*x+c*y+origin[1]+offset[1]]; });
+const sourceA={type:'Polygon',coordinates:[[[0,0],[4,0],[4,2],[0,0]]]};
+const sourceB={type:'Polygon',coordinates:[[[7,0],[9,0],[9,3],[7,0]]]};
+const settings={enabled:true,limit:null,quote:"'); __import__('os').system('bad')"};
+const group=[sourceA,sourceB].map((source,i)=>({provId:'factory-'+i,drawn:true,geometry:{type:'Polygon',coordinates:[rotate(source.coordinates[0],30,[12,-4],[0,0])]},factory:{name:'demo_component',settings,groupId:'group-1',origin:[12,-4],sourceGeometry:source,pieceIndex:i,pieceCount:2},intent:{action:'add',targetIds:[]}}));
+const rigidDoc=selectionDocument('chip.gds','hash',group,'TOP');
+assert.equal(rigidDoc.factory_references.length,1);
+assert.equal(rigidDoc.factory_references[0].status,'rigid_factory_reference');
+assert.match(rigidDoc.factory_references[0].code,/gf\.get_component\("demo_component", settings=json\.loads\(/);
+assert.match(rigidDoc.factory_references[0].code,/parent\.add_ref\(component/);
+assert(!rigidDoc.factory_references[0].code.includes('eval'));
+assert(Math.abs(rigidDoc.factory_references[0].transform.rotation_deg-30)<1e-9);
+const scaled={...group[1],geometry:{type:'Polygon',coordinates:[group[1].geometry.coordinates[0].map(([x,y],i)=>i===1?[x+1,y]:[x,y])]}};
+const fallbackDoc=selectionDocument('chip.gds','hash',[group[0],scaled],'TOP');
+assert.equal(fallbackDoc.factory_references[0].status,'geometry_authoritative');
+assert.equal(fallbackDoc.factory_references[0].code,undefined);
+assert.deepEqual(fallbackDoc.annotations[1].geometry,scaled.geometry);
+const holeSource={type:'Polygon',coordinates:[[[0,0],[4,0],[4,4],[0,0]],[[1,1],[2,1],[2,2],[1,1]]]};
+const holeComponent={provId:'factory-hole',drawn:true,geometry:{type:'Polygon',coordinates:holeSource.coordinates.map(r=>rotate(r,15,[3,5],[0,0]))},factory:{name:'demo_component',settings,groupId:'group-hole',origin:[3,5],sourceGeometry:holeSource,pieceIndex:0,pieceCount:1},intent:{action:'add',targetIds:[]}};
+holeComponent.geometry.coordinates[1][1][0]+=0.25;
+const holeDoc=selectionDocument('chip.gds','hash',[holeComponent],'TOP');
+assert.equal(holeDoc.factory_references[0].status,'geometry_authoritative');
+const invalidFactory={...group[0],geometry:{type:'Polygon',coordinates:[[[0,0],[1,0]]]} };
+const invalidDoc=selectionDocument('chip.gds','hash',[invalidFactory],'TOP');
+assert.equal(invalidDoc.factory_references[0].reason,'invalid_current_geometry');
+assert.equal(invalidDoc.annotations[0].target_status,'invalid_geometry');
 fs.rmSync(tmp,{recursive:true});
 console.log('Selection YAML, identity, precision, missing provenance and annotation checks passed');

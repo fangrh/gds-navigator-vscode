@@ -32,7 +32,7 @@ async function main() {
     const { GdsEditorProvider } = require(bundle);
     const values = new Map();
     const messages = [];
-    const context = { workspaceState: { get: (key) => values.get(key), update: async (key, value) => { if (value === undefined) values.delete(key); else values.set(key, value); } } };
+    const context = { extensionUri: { fsPath: ROOT }, globalStorageUri: { fsPath: path.join(temp, 'storage') }, workspaceState: { get: (key) => values.get(key), update: async (key, value) => { if (value === undefined) values.delete(key); else values.set(key, value); } } };
     const provider = new GdsEditorProvider(context, {}, { appendLine() {}, show() {} });
     const entry = { gdsPath: path.join(temp, 'chip.gds'), gdsHash: 'hash-a', loading: false, disposed: false, lastSelection: [], panel: { webview: { postMessage: async (message) => { messages.push(message); return true; } } } };
     const valid = [{ id: 'a', geometry: { type: 'Point', coordinates: [1, 2] } }];

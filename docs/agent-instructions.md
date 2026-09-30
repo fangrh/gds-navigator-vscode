@@ -1,5 +1,13 @@
 # Agent instruction queue
 
+## Creating reusable components
+
+When the user asks for a new component, edit the workspace-root `gds_components.py` and register a callable in its `COMPONENTS` dictionary. Preserve existing factories and registry entries. Use a stable Python identifier as the key; the browser shows it as `project:<key>`. Factories return `gf.Component`, expose JSON-compatible parameter defaults, document units, validate dimensions, set explicit layers/datatypes, and supply meaningful ports. Imports must not write files or generate layouts; import sibling helpers normally from the project root.
+
+Use the project's selected Python environment to validate the signature, defaults and representative parameter changes. Export to a temporary GDS and inspect the actual geometry, bounding box, layers and ports. Keep validation outputs separate from user layouts. Refresh the component browser after saving. Loading requires a trusted workspace and a GDS belonging to that workspace; built-in browsing continues if the local library has an import error.
+
+Work orders for rigid custom placements include `library.module`, `library.exportName`, and a recipe looking up `COMPONENTS[exportName]`. Run it with the project root on the Python import path and the correct PDK active. Keep one component reference for the entire polygon group. Changed scale, shape, or layer makes current geometry authoritative; do not blindly reuse original factory parameters. A new library entry alone does not modify the user's generating script or existing GDS.
+
 The durable queue lives at `.gds-navigator/instructions.json` in the project root. Use `scripts/instructions.cjs --queue <absolute queue path>` when an explicit queue path is needed.
 
 The queue is a shared journal for all GDS files, while `list --gds <absolute-gds-path> --open` is the per-GDS user list. Each GDS has its own FIFO work-order list: an open earlier order for one normalized GDS identity does not block work on another GDS. `INS-...` references are stable across reloads and copies. Inspect work with `list --open` and `show INS-...`. Use the instruction ID when starting: `start INS-... --file <source.py>`; repeat `--file` for every source file whose bytes may be changed. The `--gds` option belongs to `list`, not `start`.

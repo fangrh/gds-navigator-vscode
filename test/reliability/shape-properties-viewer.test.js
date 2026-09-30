@@ -41,7 +41,27 @@ async function main() {
     await page.click('#shape-properties button[aria-label="Close shape properties"]'); assert.equal(await page.evaluate(() => shapeProperties.isOpen()), false);
     await page.evaluate(() => { replaceSelection([drawSource.getFeatures()[0]]); showShapeProperties(); }); await page.click('#shape-properties button[data-mode="move"]'); const restoreGeometry = await page.evaluate(() => drawSource.getFeatures()[0].getGeometry().getCoordinates()); const restoreRotation = await page.evaluate(() => drawSource.getFeatures()[0].get('editRotation') || 0); const p = await pagePoint(await page.evaluate(() => ol.extent.getCenter(drawSource.getFeatures()[0].getGeometry().getExtent()))); await page.mouse.move(p[0], p[1]); await page.mouse.down(); await page.mouse.move(p[0] + 70, p[1] + 10, { steps: 3 }); await page.keyboard.press('Escape'); await page.mouse.up(); await new Promise(resolve => setTimeout(resolve, 50)); assert.deepEqual(await page.evaluate(() => drawSource.getFeatures()[0].getGeometry().getCoordinates()), restoreGeometry); assert.equal(await page.evaluate(() => drawSource.getFeatures()[0].get('editRotation') || 0), restoreRotation);
     await page.evaluate(() => replaceSelection([allFeatures[0]])); await page.evaluate(() => showShapeProperties()); assert.equal(await page.$eval('#shape-properties input[data-field="x"]', el => el.disabled), true); assert.equal(await page.$eval('#shape-properties .help', el => el.textContent.includes('read-only')), true);
-    await page.screenshot({ path: path.join(out, 'viewer.png') }); assert.deepEqual(errors, []); fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ status: 'passed', numericApply: true, mouseModes: ['move', 'rotate', 'resize'], cancel: true, readonlyGds: true }, null, 2)); console.log('Shape properties browser interactions passed');
+    // A factory has multiple polygons/layers but is one editable placement.
+    await page.evaluate(() => {
+      shapeProperties.hide();clearSelection();drawSource.clear();
+      [0,10].forEach((x,i)=>{const f=new ol.Feature(new ol.geom.Polygon([[[x,0],[x+4,0],[x+4,4],[x,4],[x,0]]]));f.setProperties({isDrawn:true,annotationId:'factory-'+i,shapeType:'polygon',layer:i+'/0',factory:{name:'coupler',groupId:'group-test',pieceIndex:i,pieceCount:2},intent:{action:'add'}});drawSource.addFeature(f);});
+      replaceSelection([drawSource.getFeatures()[0]]);onSelectionChanged();map.getTargetElement().focus();
+    });
+    assert.equal(await page.evaluate(()=>selectedFeatures.getLength()),2);
+    assert.equal(await page.evaluate(()=>editableDrawings.getLength()),0,'factory must not expose individual vertex edits');
+    await page.keyboard.press('Tab');await page.waitForFunction(()=>shapeProperties.isOpen());
+    await page.$$eval('#shape-properties input',els=>{const v={x:30,y:40,width:28,height:8,rotation:90};els.forEach(el=>el.value=String(v[el.dataset.field]));});
+    await page.$$eval('#shape-properties button',bs=>bs.find(b=>b.textContent==='Apply').click());
+    const grouped=await page.evaluate(()=>({metrics:shapeMetrics(selectedShape()),layers:drawSource.getFeatures().map(f=>f.get('layer')),centers:drawSource.getFeatures().map(f=>ol.extent.getCenter(f.getGeometry().getExtent()))}));
+    for(const [key,value] of Object.entries({x:30,y:40,width:28,height:8,rotation:90}))assert(Math.abs(grouped.metrics[key]-value)<1e-8,key);
+    assert.deepEqual(grouped.layers,['0/0','1/0']);assert(Math.abs(grouped.centers[1][1]-grouped.centers[0][1]-20)<1e-8);
+    await page.evaluate(()=>{map.getView().fit([15,15,45,65],{size:map.getSize(),padding:[100,100,100,100],duration:0});map.renderSync();});
+    await page.click('#shape-properties button[data-mode="move"]');
+    await new Promise(r=>setTimeout(r,80));
+    const groupPoint=await pagePoint(grouped.centers[0]);await page.mouse.move(...groupPoint);await page.mouse.down();await page.mouse.move(groupPoint[0]+25,groupPoint[1]+20,{steps:3});await page.mouse.up();
+    const moved=await page.evaluate(()=>drawSource.getFeatures().map(f=>ol.extent.getCenter(f.getGeometry().getExtent())));
+    assert(Math.abs(moved[0][0]-grouped.centers[0][0])>1e-6);assert(Math.abs((moved[1][0]-grouped.centers[1][0])-(moved[0][0]-grouped.centers[0][0]))<1e-8);
+    await page.screenshot({ path: path.join(out, 'viewer.png') }); assert.deepEqual(errors, []); fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ status: 'passed', numericApply: true, mouseModes: ['move', 'rotate', 'resize'], factoryGroup: true, cancel: true, readonlyGds: true }, null, 2)); console.log('Shape properties browser interactions passed');
   } finally { await browser.close(); await new Promise(resolve => s.close(resolve)); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,5 +1,13 @@
 # ISSUES.md
 
+## 2026-09-30 Project component libraries (TASK-16)
+
+- Added a workspace-root `gds_components.py` registry for reusable gdsfactory cells, parameter inspection, real GDS previews, layers and ports. Custom names use `project:` and retain registry identity in placed proposals and executable rigid-reference work orders. Initialization writes an example library exclusively and preserves existing files.
+- Local registry loading follows workspace trust and the workspace containing the opened GDS. Webview-supplied roots are ignored. Import errors leave built-ins available. Refresh clears browser caches and cancels old drafts; custom host previews are rebuilt because arbitrary helper dependencies cannot be fingerprinted reliably.
+- Eight component checks, TypeScript and production packaging passed. Browser validation used installed Chromium after Edge exited before opening its automation endpoint. The broader port fixture computed click coordinates before the map's changed view rendered; synchronizing that render passed its original click/hide/reload gate. Prior successful reliability stages plus the resumed port/parser/sidebar stages passed. See logs/reliability/project-components-delivery.json and component-validation-recovery.json.
+- Installed the VSIX and matched installed extension, loader, chooser, viewer and agent-guide hashes. The first package captured a live test's temporary project; moving temporary fixtures outside the repository and excluding their old patterns produced a clean 47-file package. Existing dirty work was preserved.
+- Skill feedback: focused behavioral gates and native recovery records fit this software extension. The operation review found no skill proposal; no scientific matrix or route change is supported.
+
 ## 2026-09-22 TASK-7: reduced-image marker ambiguity fixed
 
 - Reproducer: `D:/gds2027/images/ebl.png` (398x348), SHA256 `17d74af048abc235aafb631f3d2c01d0ce08c7284e528032f61164efa7745ead`, current electrode-100 GDS. Four squares were detected, but width-based initial scale excluded a correct correspondence. Failed evidence: `logs/marker-ambiguity/before/result.json`.
@@ -344,3 +352,47 @@
 - The sidebar setup action now chooses an existing verified Python, or creates a folder-local interpreter with installed uv, Conda, or Python venv. Manager commands use argument arrays with timeout, output and cancellation bounds; creation refuses an existing target. Package choices explicitly install KLayout, standard gdsfactory, or an editable local fork into the selected interpreter. The chosen folder saves one resource-scoped Python and launcher; environment schema 2 records package capabilities while reading schema 1 remains supported.
 - `npm run test:environment`, `npx tsc --noEmit`, and production build/package passed. The isolated real VS Code `--setup-env` journey passed 23 records including reopened windows. The prior combined environment script also ran unrelated work-order checks and timed out waiting for a comment; the environment scripts now invoke their focused modes without `--work-orders`. This failure is retained as a work-order harness observation, not environment acceptance evidence.
 - Packaged and installed `logs/gds-navigator-latest.vsix`; source and installed `dist/extension.js` SHA256 matched. Manual divergence review: the change stays within folder environment setup and test command scoping. Route-implementation's named superpowers skill is unavailable in the active inventory; direct focused implementation and regression checks were used. No scientific claim is inferred from these software checks.
+
+
+## 2026-09-28 Visual factory catalog and component properties (TASK-8)
+
+- Sorted, searchable factory cards show actual SVG geometry on selection, with a 24-entry preview cache and reset on layout reload. Previews preserve polygon holes and GDS orientation. Required arguments remain explicit JSON settings.
+- Factory polygons now select and transform as one placement while retaining layer and annotation IDs. Tab opens grouped properties; mouse move/resize/rotate reuse existing controls. Escape resets the pointer sequence so a later drag is accepted.
+- Image-only canvas clicks route Tab to the image inspector; foreground geometry retains priority. Image dragging skips repeated inspector reconstruction until release. This removes redundant UI work; no quantified frame-rate improvement is claimed.
+- Validation: installed catalog discovered 344 factories and built four real previews; focused chooser, overlay/display and complete EDA UI suite passed. Browser evidence is in logs/reliability. Production build and TypeScript check passed.
+- Skill feedback/manual divergence review: route-implementation and route-claim-done fit this reusable UI change; optional superpowers files remain unavailable. Direct implementation plus browser checks supplied the gate. Operation review found no repeated unchanged checks or pending validation; no route change proposed.
+
+
+## 2026-09-28 Factory icon and placement follow-up (TASK-9)
+
+- User reported icons remained unloaded and component selection did not act like a placeable shape. The earlier selection-only thumbnail policy and separate Insert step did not meet that interaction. Replaced with visible-card thumbnail batches on an independent host request channel, bounded geometry/cache and explicit unavailable states.
+- Card click now starts an uncommitted mouse preview; canvas click commits, Tab edits draft or placed geometry, Escape cancels. The browser test verifies no early annotation save and a component work-order payload after placement. Factory settings, group, ports, source layers and geometry are retained.
+- Export matches one shared rigid transform against all polygon rings before emitting factory reference code. Deformed, incomplete or relayered groups keep exact geometry instead. Source Python/GDS remains a work-order implementation step.
+- Software validation includes EDA browser regressions, installed factory thumbnail batches and selection export checks. No rendering FPS claim. Skill feedback: the previous gate checked a weaker interaction than the user expected; the acceptance now explicitly requires icons before selection and direct click-to-canvas placement. No scientific matrix or route change needed.
+
+## 2026-09-28 Component performance (TASK-10)
+
+- Reused keyed catalog cards and bounded SVG clones; thumbnail replies update affected rows without rebuilding the list. The 344-card browser fixture reduced createElement/createElementNS calls from 1048 to 2 for a thumbnail reply and 1057 to 5 for cached selection. These counters exclude cloneNode allocations. Exact pre-change source and SHA256 are retained with logs/performance/components.json.
+- Added bounded host preview caching (32 entries, 8 MiB, 30-second TTL), canonical settings, verified executable/script context, defensive copies and cancellation checks. Complete fresh default thumbnails seed placement previews. Actual local straight-component generation measured 2339 ms cold and 0.149 ms median for five cached repeats; cold generation itself is unchanged.
+- Coalesced draft pointer movement per animation frame, kept exact click placement and cancellation. A 200-event burst across three polygons fell from 600 geometry changes to 3 with identical final coordinates. This is a work-count improvement, not a measured FPS or input-latency claim.
+- TypeScript, cache/cancellation/eviction tests, installed Python catalog checks, chooser benchmark and full UI regressions passed, including placement, Tab properties and work orders. Evidence is under logs/performance and logs/reliability. Existing dirty work was preserved.
+- Skill feedback/manual divergence review: profiling plus behavior checks suited this software optimization. No scientific claim or route change is needed; bounded caches trade short-lived memory for less repeated Python and DOM work.
+
+## 2026-09-28 Editor-wide performance (TASK-11)
+
+- Audited loading, styles, selection, properties, image rendering and work orders. Batched map insertion, per-load source resolution, bounded style reuse, contour-mask reuse, set-based bulk selection, indexed annotation comparison and one-save bulk deletion remove repeated work without simplifying geometry. Work-order reconciliation indices preserve ambiguity checks. See docs/performance.md and logs/performance for scoped counters.
+- Corrected the browser benchmark to detach the comparator listener before subsequent selection mutations: isolated insertion is 3000 versus 2 source-change events. Earlier exploratory figures included later selection events. Image evidence uses the same five-state sequence on both implementations; per-pixel edge calls and whole-image scan counts are intentionally not compared.
+- Full alignment checks passed. The broader reliability run exposed an outdated provider-test context missing extensionUri/globalStorageUri; supplied isolated storage paths in the fixture and the provider test plus remaining reliability checks passed. UI and work-order suites passed. No user environment or source-layout changes were needed.
+- Skill feedback/manual divergence review: operation counts and output equivalence are the performance gate; they do not prove FPS improvements. Existing property updates and full parsing correctness checks were retained. Measured reductions support the selected implementation route; no scientific matrix change applies.
+
+## 2026-09-28 Continued performance and GDS sidebar (TASK-12 to TASK-14)
+
+- Indexed frozen work-order target IDs once per reconciliation; the 100-target mixed fixture reports 1,300 ID lookups while preserving relink and ambiguity checks. Coalesced microscope drag warps to one per animation frame, with one exact final render; a 201-move fixture produced two total renders. These are work-count results, not measured end-to-end latency or FPS.
+- The Activity Bar Workspace view now lists up to 500 GDS files with folder context, file-change refresh and direct custom-editor opening. Setup actions remain available. Focused reliability, TypeScript, production package and the 9-record VS Code lifecycle check passed; the installed bundle and viewer source match the package.
+- The first two broad lifecycle runs timed out on a fixed green-pixel threshold when the Chat panel narrowed the canvas. Diagnostic state and screenshot showed the aligned image visible. A viewport-scaled threshold passed the original gate. No research route or scientific matrix edit is supported by this software-only result.
+
+## 2026-09-28 Selectable ports (TASK-15)
+
+- Normalized provenance-sidecar ports through the layout instance transform and deduplicated polygon-derived records. The viewer sidebar now switches port markers and names independently; marker clicks select exact port metadata. Placed factory component ports follow rigid translation and rotation, while edited nonrigid geometry omits uncertain port positions.
+- Parser transform fixtures, factory-pose checks, browser click/hide/reload checks, YAML serialization, reliability and performance suites passed. Packaged and installed the VSIX; installed parser and overlay hashes match the workspace build.
+- Skill feedback/manual divergence review: the implementation route and focused gates fit this software UI change. The operation review reported no repeated checks or pending validation and produced no new skill proposal. Factory port selections remain inspect/copy context; component geometry is the work-order target.

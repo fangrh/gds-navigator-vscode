@@ -1,0 +1,10 @@
+'use strict';
+const assert=require('assert/strict'),fs=require('fs'),path=require('path'),vm=require('vm');
+const context={};vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../../webview/port-overlay.js'),'utf8'),context);
+const source={type:'Polygon',coordinates:[[[0,0],[2,0],[2,1],[0,1],[0,0]]]};
+const rotate=p=>[-p[1]+10,p[0]+20];
+const feature={get(key){return this[key]},getGeometry(){return {getCoordinates:()=>this.coordinates}},factory:{groupId:'placed',pieceIndex:0,pieceCount:1,name:'demo',sourceGeometry:source,ports:[{name:'in',center:[1,0],width:0.5,orientation:0,layer:[1,0]}]},coordinates:source.coordinates.map(r=>r.map(rotate))};
+const ports=context.PortOverlay.factoryPorts([feature]);
+assert.equal(ports.length,1);assert.deepEqual(Array.from(ports[0].center),[10,21]);assert.equal(ports[0].orientation,90);
+feature.coordinates[0][1]=[123,456];assert.equal(context.PortOverlay.factoryPorts([feature]).length,0);
+console.log(JSON.stringify({status:'passed',transformed:true,deformedGroupRejected:true}));

@@ -248,3 +248,16 @@ body.eda-workbench #instruction-bar :is(button,select):focus-visible {outline:1p
 #review-diff-list { max-height: 300px; overflow: auto; }
 #review-diff-list button { display: block; width: calc(100% - 4px); text-align: left; }
 #eda-tabs { flex-wrap: wrap; }
+
+/* EDA library: recognizable geometry beside short, sorted names. */
+#component-catalog .component-chooser > div:first-child { flex-wrap: wrap; gap: 6px; }
+#component-catalog select { max-width: 100%; padding: 4px; }
+#component-catalog [role=listbox] { max-height: 290px; display: grid; gap: 5px; }
+#component-catalog .component-card { display: flex; align-items: center; gap: 10px; padding: 5px; min-height: 72px; white-space: normal; }
+#component-catalog .component-card-thumb { display: flex; align-items: center; justify-content: center; flex: 0 0 96px; height: 64px; color: var(--eda-muted); background: var(--eda-bg); border-radius: 3px; font-size: 10px; }
+#component-catalog .component-card-name { overflow-wrap: anywhere; font-weight: 600; min-width: 0; }
+#component-catalog .component-card[aria-selected=true] { border-color: var(--eda-accent); background: var(--eda-selection); }
+#component-catalog svg { display: block; background: var(--eda-bg); border-radius: 4px; }
+#component-catalog h4 { margin: 10px 0 6px; }
+#component-catalog textarea { box-sizing: border-box; padding: 6px; }
+#component-catalog [role=status] { margin: 5px 0; color: var(--eda-muted); }

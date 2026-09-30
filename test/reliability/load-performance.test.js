@@ -1,0 +1,23 @@
+'use strict';
+const assert=require('assert/strict'),fs=require('fs'),path=require('path'),os=require('os');
+const {buildSync}=require('esbuild');
+const out=fs.mkdtempSync(path.join(os.tmpdir(),'gds-load-perf-'));
+buildSync({entryPoints:[path.join(__dirname,'../../src/loadPerformance.ts')],bundle:true,platform:'node',outfile:path.join(out,'load.cjs')});
+const {createSourceResolver,annotationChanges}=require(path.join(out,'load.cjs'));
+const roots=[path.resolve('project'),path.resolve('workspace')];
+let checks=0;
+const resolve=createSourceResolver(roots,file=>{checks++;return file===path.join(roots[0],'source.py');});
+for(let i=0;i<10000;i++){const ref={file:'source.py'};resolve(ref);assert.equal(ref.resolved_file,path.join(roots[0],'source.py'));assert.equal(ref.source_resolution,'resolved_location');}
+assert.equal(checks,2);
+const unavailable={file:'missing.py'};resolve(unavailable);assert.equal(unavailable.source_resolution,'unavailable');
+const refreshed={file:'missing.py'};createSourceResolver(roots,()=>true)(refreshed);assert.equal(refreshed.source_resolution,'ambiguous');assert.equal(refreshed.resolved_file,undefined);
+createSourceResolver([roots[0]],()=>true)(unavailable);assert.equal(unavailable.source_resolution,'resolved_location');
+const absolute={file:path.join(roots[0],'source.py')};let absChecks=0;createSourceResolver(roots,()=>{absChecks++;return true;})(absolute);assert.equal(absChecks,1);
+const before=Array.from({length:3000},(_,i)=>({id:String(i),points:[i,2]}));
+const after=before.slice(1).map(x=>({...x}));after[8]={id:after[8].id,points:[99,3]};after.push({id:'new',points:[1,2]});
+let comparisons=0;
+const legacy={changed:after.filter(a=>JSON.stringify(a)!==JSON.stringify(before.find(b=>{comparisons++;return b.id===a.id;}))),removed:before.filter(a=>!after.some(b=>{comparisons++;return b.id===a.id;}))};
+const start=performance.now();const result=annotationChanges(before,after);const elapsed=performance.now()-start;
+assert.deepEqual(result,legacy);
+fs.mkdirSync('logs/performance',{recursive:true});fs.writeFileSync('logs/performance/loading.json',JSON.stringify({status:'passed',sourceResolution:{references:10000,roots:2,beforeStatCalls:20000,afterStatCalls:2},annotations:{count:3000,legacyIdComparisons:comparisons,indexedInputVisits:before.length*2+after.length*2,elapsedMs:elapsed},scope:'Operation counts on equivalent deterministic fixtures; not end-to-end loading latency.'},null,2));
+console.log('Loading and annotation performance checks passed');

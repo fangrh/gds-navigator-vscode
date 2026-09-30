@@ -1,0 +1,118 @@
+#!/usr/bin/env node
+'use strict';
+const assert = require('assert/strict');
+const cp = require('child_process');
+const fs = require('fs');
+const http = require('http');
+const path = require('path');
+const puppeteer = require('puppeteer-core');
+const ROOT = path.resolve(__dirname, '../..');
+const browserCache = path.join(process.env.LOCALAPPDATA || '', 'ms-playwright');
+const headlessBrowsers = fs.existsSync(browserCache) ? fs.readdirSync(browserCache).filter(name=>name.startsWith('chromium_headless_shell-')).sort().reverse().map(name=>path.join(browserCache,name,'chrome-headless-shell-win64/chrome-headless-shell.exe')) : [];
+const BROWSER = [process.env.GDS_BROWSER, ...headlessBrowsers, 'C:/Program Files/Microsoft Edge/Application/msedge.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Google/Chrome/Application/chrome.exe'].filter(Boolean).find(fs.existsSync);
+assert(BROWSER, 'Edge/Chrome required; set GDS_BROWSER');
+function server() { return new Promise(resolve => { const s = http.createServer((req, res) => { const p = new URL(req.url, 'http://127.0.0.1').pathname; const f = path.resolve(ROOT, p.replace(/^\/+/, '')); if ((f !== ROOT && !f.startsWith(ROOT + path.sep)) || !fs.existsSync(f) || !fs.statSync(f).isFile()) { res.writeHead(404); return res.end('not found'); } const type = ({ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' }[path.extname(f).toLowerCase()] || 'application/octet-stream'); res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' }); res.end(fs.readFileSync(f)); }); s.listen(0, '127.0.0.1', () => resolve({ s, port: s.address().port })); }); }
+const PREVIEW = { name: 'alpha', settings: {}, geojson: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'MultiPolygon', coordinates: [[[[0, 0], [8, 0], [8, 3], [0, 3], [0, 0]], [[2, 1], [3, 1], [3, 2], [2, 2], [2, 1]]], [[[12, 0], [16, 0], [16, 4], [12, 4], [12, 0]]]] } }, { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[20, 0], [24, 0], [24, 4], [20, 4], [20, 0]]] } }] }, ports: [] };
+async function main() {
+  cp.execFileSync(process.execPath, [path.join(ROOT, 'scripts/make-standalone.js')], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
+  const out = path.join(ROOT, 'logs/reliability/component-catalog'); fs.mkdirSync(out, { recursive: true }); const { s, port } = await server(); let browser;
+  try {
+    browser = await puppeteer.launch({ executablePath: BROWSER, headless: true, args: ['--no-first-run'] });
+    const page = await browser.newPage(); await page.setViewport({ width: 1400, height: 950 }); const errors = []; page.on('pageerror', e => errors.push(e.message));
+    await page.goto(`http://127.0.0.1:${port}/webview/test-standalone.html?data=/test/fixtures/real_geojson`, { waitUntil: 'networkidle0' }); await page.waitForFunction(() => window.__viewerReady && allFeatures.length > 0, { timeout: 10000 });
+    await page.click('#shape-menu-btn'); await page.waitForSelector('#component-catalog [role=listbox]');
+    const catalogRequest = await page.evaluate(() => window.__sent.filter(m => m.type === 'requestComponentCatalog').at(-1)); assert(catalogRequest, 'catalog request missing');
+    await page.evaluate(id => window.dispatchEvent(new MessageEvent('message', { data: { type: 'componentCatalog', requestId: id, result: { components: [{ name: 'zeta', category: 'Other', parameters: [{ name: 'width', required: true }] }, { name: 'alpha', category: 'Basic', parameters: [] }] } } })), catalogRequest.requestId);
+    await page.waitForSelector('#component-catalog [role=option].component-card'); await page.waitForFunction(() => document.querySelector('#component-catalog .component-card-name')?.textContent === 'alpha');
+    await page.waitForFunction(()=>__sent.some(m=>m.type==='requestComponentThumbnails'));
+    const thumbRequest=await page.evaluate(()=>__sent.find(m=>m.type==='requestComponentThumbnails'));
+    await page.evaluate(({id,result})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentThumbnails',requestId:id,result:{items:[result,{name:'zeta',error:'width required'}]}}})),{id:thumbRequest.requestId,result:PREVIEW});
+    await page.waitForSelector('#component-catalog .component-card-thumb svg path');
+    assert.equal(await page.evaluate(()=>__sent.filter(m=>m.type==='previewComponent').length),0,'icon loading required selection');
+    await page.screenshot({path:path.join(out,'catalog.png')});
+    await page.click('#component-catalog .component-card');
+    const previewRequest=await page.evaluate(()=>__sent.filter(m=>m.type==='previewComponent').at(-1));
+    await page.evaluate(({id,result})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentPreview',requestId:id,result}})),{id:previewRequest.requestId,result:PREVIEW});
+    await page.waitForFunction(()=>!!factoryDraft);
+    assert.equal(await page.evaluate(()=>drawSource.getFeatures().length),0,'draft committed before canvas click');
+    const pointerProfile=await page.evaluate(async()=>{
+      let changes=0;const geometries=factoryDraft.shapes.map(f=>f.getGeometry()),count=()=>changes++;
+      geometries.forEach(g=>g.on('change',count));const start=performance.now();
+      for(let i=0;i<200;i++)map.dispatchEvent({type:'pointermove',coordinate:[i/10,i/20],pixel:[0,0],originalEvent:{}});
+      await new Promise(resolve=>requestAnimationFrame(resolve));
+      geometries.forEach(g=>g.un('change',count));return {events:200,pieces:geometries.length,changes,elapsedMs:performance.now()-start,origin:factoryDraft.origin};
+    });
+    fs.mkdirSync(path.join(ROOT,'logs/performance'),{recursive:true});fs.writeFileSync(path.join(ROOT,'logs/performance/placement-current.json'),JSON.stringify(pointerProfile,null,2));
+    assert.deepEqual(pointerProfile.origin,[19.9,9.95]);assert(pointerProfile.changes<=pointerProfile.pieces,'pointer burst was not coalesced');
+
+    await page.keyboard.press('Tab');await page.waitForFunction(()=>shapeProperties.isOpen());
+    await page.$eval('#shape-properties input[data-field="rotation"]',e=>e.value='30');
+    await page.$$eval('#shape-properties button',bs=>bs.find(b=>b.textContent==='Apply').click());
+    assert.equal(await page.evaluate(()=>drawSource.getFeatures().length),0,'draft properties committed early');
+    const point=await page.$eval('#map',e=>{const r=e.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2];});
+    await page.mouse.click(...point);await page.waitForFunction(()=>!factoryDraft&&drawSource.getFeatures().length===3&&selectedFeatures.getLength()===3);
+    assert.equal(await page.evaluate(()=>selectedFeatures.getLength()),3);
+    await page.type('#intent-text','Place this component here');await page.click('#queue-instruction');
+    const order=await page.evaluate(()=>__sent.filter(m=>m.type==='instructionAction'&&m.workOrder).at(-1));
+    assert.equal(order.components.length,3);assert(order.components.every(c=>c.factory.name==='alpha'&&c.geometry.type==='Polygon'));
+    await page.evaluate(()=>{pendingWorkOrder=null;document.getElementById('queue-instruction').disabled=false;shapeProperties.hide();});
+    await page.click('#shape-menu-btn');await page.click('#component-catalog .component-card');
+    await page.waitForFunction(()=>!!factoryDraft);assert.equal(await page.evaluate(()=>__sent.filter(m=>m.type==='previewComponent').length),1,'cache missed');
+    await page.evaluate(()=>map.dispatchEvent({type:'pointermove',coordinate:[42,17],pixel:[0,0],originalEvent:{}}));
+    await page.keyboard.press('Escape');await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));assert.equal(await page.evaluate(()=>factoryDraft),null);
+    assert.equal(await page.evaluate(()=>drawSource.getFeatures().length),3,'cancel inserted another component');
+    await page.evaluate(()=>{replaceSelection(drawSource.getFeatures());showShapeProperties();});
+    // Use real project factories through the same message protocol as VS Code.
+    const projectRoot = fs.mkdtempSync(path.join(ROOT, 'logs/reliability/project-browser-'));
+    const starterBundle = path.join(projectRoot, 'starter.cjs');
+    require('esbuild').buildSync({ entryPoints: [path.join(ROOT, 'src/starterProject.ts')], bundle: true, platform: 'node', outfile: starterBundle });
+    require(starterBundle).initializeGdsProject(projectRoot);
+    const python = process.env.GDS_TEST_PYTHON || path.join(ROOT, '.venv-fork/Scripts/python.exe');
+    const call = args => JSON.parse(cp.execFileSync(python, [path.join(ROOT, 'python/component_catalog.py'), ...args, '--project-root', projectRoot], { encoding: 'utf8', timeout: 60000, maxBuffer: 32 * 1024 * 1024 }));
+    await page.evaluate(()=>shapeProperties.hide());
+    await page.click('#shape-menu-btn');
+    await page.waitForSelector('#component-catalog [aria-label="Refresh component library"]', { visible:true });
+    await page.click('#component-catalog [aria-label="Refresh component library"]');
+    const freshRequest = await page.evaluate(()=>__sent.filter(m=>m.type==='requestComponentCatalog').at(-1));
+    await page.evaluate(({id,result})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentCatalog',requestId:id,result}})), { id: freshRequest.requestId, result: call(['--catalog']) });
+    await page.select('#component-catalog select', 'Project components');
+    await page.waitForFunction(()=>document.querySelector('#component-catalog .component-card-name')?.textContent==='project:electrical_strip');
+    await page.click('#component-catalog .component-card');
+    const customRequest = await page.evaluate(()=>__sent.filter(m=>m.type==='previewComponent').at(-1));
+    assert.equal(customRequest.name, 'project:electrical_strip');
+    const customPreview = call(['--preview', customRequest.name, JSON.stringify(customRequest.settings)]);
+    await page.evaluate(({id,result})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentPreview',requestId:id,result}})), { id: customRequest.requestId, result: customPreview });
+    await page.waitForFunction(()=>!!factoryDraft);
+    await page.mouse.click(...point);
+    await page.waitForFunction(()=>!factoryDraft&&drawSource.getFeatures().length===4&&selectedFeatures.getLength()===1&&selectedFeatures.item(0).get('factory')?.name==='project:electrical_strip');
+    const selectedFactory = await page.evaluate(()=>selectedFeatures.item(0).get('factory'));
+    assert.deepEqual(selectedFactory.library, { module:'gds_components',exportName:'electrical_strip' });
+    assert.equal(selectedFactory.ports.length, 2);
+    await page.$eval('#intent-text', el=>{el.value='Place my custom electrical strip';el.dispatchEvent(new Event('input',{bubbles:true}));});
+    await page.click('#queue-instruction');
+    const customOrder = await page.evaluate(()=>__sent.filter(m=>m.type==='instructionAction'&&m.workOrder).at(-1));
+    assert.equal(customOrder.components.length, 1);
+    assert.deepEqual(customOrder.components[0].factory.library, selectedFactory.library);
+    // Refresh cancels an old draft and obtains fresh source after editing.
+    await page.evaluate(()=>{pendingWorkOrder=null;document.getElementById('queue-instruction').disabled=false;shapeProperties.hide();});
+    await page.click('#shape-menu-btn');
+    await page.waitForSelector('#component-catalog .component-card', { visible:true });
+    await page.click('#component-catalog .component-card');
+    await page.waitForFunction(()=>!!factoryDraft);
+    await page.click('#eda-tab-components');
+    await page.click('#component-catalog [aria-label="Refresh component library"]');
+    assert.equal(await page.evaluate(()=>factoryDraft), null);
+    fs.appendFileSync(path.join(projectRoot, 'gds_components.py'), '\nCOMPONENTS["new_strip"] = electrical_strip\n');
+    const updatedRequest = await page.evaluate(()=>__sent.filter(m=>m.type==='requestComponentCatalog').at(-1));
+    await page.evaluate(({id,result})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentCatalog',requestId:id,result}})), { id: updatedRequest.requestId, result: call(['--catalog']) });
+    await page.select('#component-catalog select', 'Project components');
+    await page.waitForFunction(()=>document.querySelectorAll('#component-catalog .component-card').length===2);
+    await page.waitForFunction(()=>__sent.filter(m=>m.type==='requestComponentThumbnails').at(-1)?.names.includes('project:new_strip'));
+    const updatedThumbnails = await page.evaluate(()=>__sent.filter(m=>m.type==='requestComponentThumbnails').at(-1));
+    await page.evaluate(({id,result})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentThumbnails',requestId:id,result}})), { id:updatedThumbnails.requestId,result:call(['--thumbnails',JSON.stringify(updatedThumbnails.names)]) });
+    await page.waitForFunction(()=>document.querySelectorAll('#component-catalog .component-card-thumb svg').length===2);
+    fs.writeFileSync(path.join(out,'project-workflow.json'),JSON.stringify({status:'passed',realGds:true,ports:2,customWorkOrder:true,refreshNewEntry:true,refreshCancelsDraft:true},null,2));
+    await page.screenshot({ path: path.join(out, 'viewer.png') }); assert.deepEqual(errors, []); fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ status: 'passed', sortedCards: true, visibleIconsBeforeSelection: true, autoPreview: true, geometryThumbnail: true, cachedRevisit: true, canvasPlacement: true, unplacedTabEdits: true, workOrderPayload: true, cancelPlacement: true, groupedProperties: true }, null, 2)); console.log('Component catalog browser interactions passed');
+  } finally { if (browser) await browser.close(); await new Promise(resolve => s.close(resolve)); }
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

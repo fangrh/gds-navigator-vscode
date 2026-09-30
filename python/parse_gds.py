@@ -8,6 +8,7 @@ plain ``<base>.json`` file sitting next to the .gds.
 import json
 import sys
 import os
+import math
 
 _DBG = False  # set to True to log array-index diagnostics
 _DBG_LOG: list = []
@@ -63,10 +64,23 @@ def _load_sidecar(gds_path):
             for entry in entries
             if isinstance(entry, dict) and isinstance(entry.get("id"), (str, int))
         }
-        ports_by_component = data.get("ports", {})
-        if not isinstance(ports_by_component, dict):
+        raw_ports = data.get("ports", {})
+        if not isinstance(raw_ports, dict):
             warnings.append("sidecar ports is not an object")
             ports_by_component = {}
+        else:
+            ports_by_component = {}
+            for component, ports in raw_ports.items():
+                if not isinstance(component, str) or not isinstance(ports, list):
+                    warnings.append(f"sidecar ports entry {component!r} is malformed")
+                    continue
+                valid_ports = []
+                for index, port in enumerate(ports):
+                    if not _valid_port_record(port):
+                        warnings.append(f"sidecar port {component}[{index}] is malformed")
+                        continue
+                    valid_ports.append(port)
+                ports_by_component[component] = valid_ports
         ref_names = data.get("ref_names", {})
         if not isinstance(ref_names, dict):
             warnings.append("sidecar ref_names is not an object")
@@ -74,6 +88,24 @@ def _load_sidecar(gds_path):
         return entries_by_id, ports_by_component, ref_names, warnings
     except Exception:
         return {}, {}, {}, ["sidecar JSON could not be read"]
+
+
+def _valid_port_record(port):
+    """Return whether a sidecar port has the finite gdsfactory port schema."""
+    if not isinstance(port, dict) or not isinstance(port.get("name"), str) or not port.get("name"):
+        return False
+    center = port.get("center")
+    layer = port.get("layer")
+    if not isinstance(center, (list, tuple)) or len(center) != 2:
+        return False
+    if not isinstance(layer, (list, tuple)) or len(layer) != 2:
+        return False
+    numeric = [port.get("width"), port.get("orientation"), center[0], center[1], layer[0], layer[1]]
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) for value in numeric):
+        return False
+    if float(port.get("width")) <= 0 or any(int(value) != value or int(value) < 0 for value in layer):
+        return False
+    return True
 
 
 def _parse_call_stack_string(frame_str):
@@ -373,6 +405,15 @@ def _get_feature_provenance(iterator, provenance_by_cell, sidecar_by_id, ports_b
     if cell_name and "cell" not in prov:
         prov["cell"] = cell_name
 
+    # Cell-level provenance can be the only available source for layouts that
+    # do not carry per-shape sidecar IDs. Attach the same validated component
+    # port metadata used by sidecar entries in that case.
+    if ports_by_component and "ports" not in prov:
+        comp_name = prov.get("component", "")
+        ports = ports_by_component.get(comp_name) or ports_by_component.get(cell_name)
+        if ports:
+            prov["ports"] = ports
+
     return prov or None
 
 
@@ -412,6 +453,44 @@ def _compute_array_element_index(iterator):
         return None
 
 
+def _transformed_ports(iterator, provenance, ports, array_index):
+    """Transform component-local ports into layout coordinates for one shape."""
+    if not ports:
+        return []
+    import klayout.db as kdb
+
+    transform = iterator.dtrans()
+    result = []
+    for port in ports:
+        local_center = [float(port["center"][0]), float(port["center"][1])]
+        center = transform * kdb.DPoint(local_center[0], local_center[1])
+        angle = math.radians(float(port["orientation"]))
+        direction = transform * kdb.DVector(math.cos(angle), math.sin(angle))
+        orientation = math.degrees(math.atan2(direction.y, direction.x)) % 360.0
+        if not all(math.isfinite(value) for value in (center.x, center.y, orientation)):
+            continue
+        parent = str(provenance.get("instance_name") or provenance.get("cell") or provenance.get("file") or "layout")
+        index = json.dumps(array_index, separators=(",", ":")) if array_index is not None else ""
+        # Include the transformed center so same-named ports in one component
+        # remain distinct while repeated polygons deduplicate exactly.
+        center_key = f"{center.x:.9g},{center.y:.9g}"
+        port_id = f"{parent}[{index}]:{port['name']}@{center_key}"
+        source = dict(provenance)
+        source.pop("ports", None)
+        result.append({
+            "id": port_id,
+            "name": port["name"],
+            "center": [center.x, center.y],
+            "width": float(port["width"]),
+            "orientation": orientation,
+            "layer": [int(port["layer"][0]), int(port["layer"][1])],
+            "source_center": local_center,
+            "coordinate_frame": "layout",
+            "provenance": source,
+        })
+    return result
+
+
 def parse_gds(filepath: str) -> dict:
     """Parse a .gds file and return GeoJSON FeatureCollection."""
     import klayout.db as kdb
@@ -424,8 +503,9 @@ def parse_gds(filepath: str) -> dict:
 
     top = layout.top_cell()
     if top is None:
-        return {"type": "FeatureCollection", "features": []}
+        return {"type": "FeatureCollection", "features": [], "ports": []}
     features = []
+    ports = {}
     min_x = min_y = float("inf")
     max_x = max_y = float("-inf")
     for li in layout.layer_indexes():
@@ -451,6 +531,8 @@ def parse_gds(filepath: str) -> dict:
                     if array_idx is not None:
                         provenance["array_index"] = array_idx
                     properties["provenance"] = provenance
+                    for port in _transformed_ports(it, provenance, provenance.get("ports"), array_idx):
+                        ports.setdefault(port["id"], port)
                 features.append({
                     "type": "Feature",
                     "geometry": {"type": "Polygon", "coordinates": [ring]},
@@ -474,7 +556,7 @@ def parse_gds(filepath: str) -> dict:
         except Exception:
             pass
 
-    result = {"type": "FeatureCollection", "features": features, "top_cell": top.name if top else None}
+    result = {"type": "FeatureCollection", "features": features, "ports": sorted(ports.values(), key=lambda port: port["id"]), "top_cell": top.name if top else None}
     if features:
         result["bbox"] = [min_x, min_y, max_x, max_y]
     # Inject version marker + diagnostic summary so the viewer / TypeScript

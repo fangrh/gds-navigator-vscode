@@ -33,7 +33,7 @@
       "gdsNavigator": [
         {
           "id": "gdsNavigator.start",
-          "name": "Start"
+          "name": "Workspace"
         }
       ]
     },
@@ -162,12 +162,15 @@
     "build:webview": "node esbuild-webview.mjs",
     "package": "npm run build:webview && node esbuild.mjs --production",
     "test": "npm run test:alignment && npm run test:reliability",
+    "test:performance": "node test/reliability/load-performance.test.js && node test/reliability/editor-performance.test.js && node test/reliability/render-performance.test.js && node test/alignment/image-performance.test.js && node test/alignment/image-drag-performance.test.js && node test/reliability/tracking-performance.test.js",
     "test:alignment": "node test/alignment/numbered-markers.test.js && node test/alignment/reduced-marker-image.test.js && node test/alignment/numbered-inputs.test.js && node test/alignment/alignment-store.test.js && node test/alignment/alignment-persistence.test.js && node test/alignment/multi-image-store.test.js && node test/alignment/microscope-overlay.test.js && node test/alignment/image-display.test.js && node test/alignment/numbered-robustness.test.js",
     "test:alignment:quick": "node test/alignment/numbered-markers.test.js",
     "test:alignment:legacy": "node test/alignment/run-tests.js",
     "test:alignment:viewer": "node test/alignment/numbered-viewer.test.js",
-    "test:reliability": "node test/reliability/selection.test.js && node test/reliability/build-contract.test.js && node test/reliability/provenance-contract.test.js && node test/reliability/viewer-instructions.test.js && node test/reliability/provider-contract.test.js && node test/reliability/primitives.test.js && node test/reliability/primitives-viewer.test.js && node test/reliability/starter-project.test.js",
+    "test:reliability": "node test/reliability/selection.test.js && node test/reliability/build-contract.test.js && node test/reliability/provenance-contract.test.js && node test/reliability/viewer-instructions.test.js && node test/reliability/provider-contract.test.js && node test/reliability/primitives.test.js && node test/reliability/primitives-viewer.test.js && node test/reliability/port-overlay.test.js && node test/reliability/ports-viewer.test.js && python test/reliability/port-parser.test.py && node test/reliability/starter-project.test.js && node test/reliability/sidebar.test.js",
+    "test:ports": "node test/reliability/port-overlay.test.js && node test/reliability/ports-viewer.test.js && python test/reliability/port-parser.test.py",
     "test:starter": "node test/reliability/starter-project.test.js",
+    "test:components": "node test/reliability/component-catalog.test.js && node test/reliability/project-components.test.js && node test/reliability/project-components-provider.test.js && node test/reliability/component-cache.test.js && node test/reliability/component-chooser.test.js && node test/reliability/factory-reference.test.js && node test/reliability/starter-project.test.js && node test/reliability/component-catalog-viewer.test.js",
     "test:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js",
     "test:conditions": "node test/reliability/working-conditions.test.js",
     "test:alignment:random100": "python test/alignment/generate-random-corpus.py && node test/alignment/random-corpus.test.js",
@@ -182,7 +185,7 @@
     "test:primitives:vscode": "npm run compile && node test/reliability/demo-provenance.test.js && node test/reliability/vscode-lifecycle.test.js --primitives",
     "test:usage": "node test/reliability/usage-log.test.js && node test/reliability/usage-report.test.js && node test/reliability/usage-events.test.js && node test/reliability/usage-provider.test.js && node test/reliability/automatic-usage-report.test.js",
     "test:usage:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js --usage",
-    "test:ui": "node test/reliability/eda-workbench.test.js && node test/reliability/shape-properties-viewer.test.js && node test/reliability/manhattan-route-viewer.test.js && node test/reliability/context-menu.test.js && node test/reliability/review-tools-viewer.test.js",
+    "test:ui": "node test/reliability/eda-workbench.test.js && node test/reliability/component-catalog-viewer.test.js && node test/reliability/shape-properties-viewer.test.js && node test/reliability/manhattan-route-viewer.test.js && node test/reliability/context-menu.test.js && node test/reliability/review-tools-viewer.test.js",
     "test:review": "node test/reliability/layout-review.test.js && node test/reliability/review-store.test.js && node test/reliability/review-provider.test.js && node test/reliability/review-tools-viewer.test.js",
     "test:environment": "node test/reliability/python-environment-manager.test.js && node test/reliability/python-environment.test.js && node test/reliability/project-environment.test.js && node test/reliability/handoff-runtime.test.js",
     "test:environment:setup": "npm run compile && node test/reliability/vscode-lifecycle.test.js --setup-env",

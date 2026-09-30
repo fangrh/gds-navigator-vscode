@@ -9,6 +9,7 @@ __OL_JS__
 __MARKER_JS__
 __OVERLAY_JS__
 __PRIMITIVE_JS__
+__PORT_JS__
 __CHOOSER_JS__
 __PROPERTIES_JS__
 __ROUTE_JS__
@@ -25,6 +26,10 @@ body { display: flex; background: #1a1a2e; font-family: -apple-system, BlinkMacS
 #sidebar h4 { margin: 0 0 8px 0; color: #89b4fa; font-size: 13px; }
 #sidebar button { width: 100%; margin-bottom: 8px; padding: 6px 10px; background: #45475a; color: #cdd6f4; border: 1px solid #585b70; border-radius: 4px; cursor: pointer; font-size: 12px; }
 #sidebar button:hover { background: #585b70; }
+#port-controls {padding:8px 0;border-bottom:1px solid #45475a;margin-bottom:8px;font-size:12px;}
+#port-controls label {display:flex;align-items:center;gap:5px;margin:5px 0;cursor:pointer;}
+#port-controls input {accent-color:#89b4fa;}
+#port-count {color:#a6adc8;font-size:11px;}
 #map-container { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .file-item { padding: 6px 8px; cursor: pointer; border-radius: 4px; margin-bottom: 2px; font-size: 13px; word-break: break-all; }
 .file-item:hover { background: #313244; }
@@ -122,6 +127,7 @@ __EDA_CSS__
 </head>
 <body>
 <div id="sidebar">
+    <div id="port-controls"><h4>Ports</h4><label><input id="ports-visible" type="checkbox" checked> Show ports</label><label><input id="port-names-visible" type="checkbox" checked> Show names</label><span id="port-count">No ports</span></div>
     <div class="legend-section" id="legend"></div>
 </div>
 <div id="map-container">
@@ -330,6 +336,9 @@ var ctrlPressed = false;
 var selectionCycle = 0;
 var allFeatures = [];
 var layerColors = {};
+var layoutPortRecords = [];
+var portsVisible = vscode?.getState?.()?.portsVisible !== false;
+var portNamesVisible = vscode?.getState?.()?.portNamesVisible !== false;
 
 var currentMode = 'select';
 var snapActive = false;
@@ -347,22 +356,116 @@ var drawStyleSelected = new ol.style.Style({
     fill: new ol.style.Fill({ color: 'rgba(243, 139, 168, 0.3)' })
 });
 
+// Style callbacks run on every render frame. Keep the small, immutable style
+// variants bounded so pan/zoom does not recreate the same OpenLayers objects.
+function boundedStyleCache(limit) {
+    var entries = new Map();
+    return function(key, create) {
+        if (entries.has(key)) return entries.get(key);
+        var value = create();
+        entries.set(key, value);
+        if (entries.size > limit) entries.delete(entries.keys().next().value);
+        return value;
+    };
+}
+
+var routeStyleCache = boundedStyleCache(96);
+
 var drawLayer = new ol.layer.Vector({
     source: drawSource,
     style: function(feature, resolution) {
-        if(feature.get('route')){var spec=feature.get('route'),selected=feature.get('selected');return [
+        if(feature.get('route')){var spec=feature.get('route'),selected=feature.get('selected');return routeStyleCache(JSON.stringify([selected, spec.width, resolution]), function(){return [
             new ol.style.Style({stroke:new ol.style.Stroke({color:selected?'rgba(137,180,250,.4)':'rgba(243,139,168,.3)',width:Math.max(1,Math.min(2048,spec.width/resolution)),lineCap:'butt',lineJoin:'miter'})}),
-            new ol.style.Style({stroke:new ol.style.Stroke({color:selected?'#ffffff':'#f38ba8',width:2,lineDash:[6,4],lineCap:'butt',lineJoin:'miter'})})];}
+            new ol.style.Style({stroke:new ol.style.Stroke({color:selected?'#ffffff':'#f38ba8',width:2,lineDash:[6,4],lineCap:'butt',lineJoin:'miter'})})];});}
         return feature.get('selected') ? drawStyleSelected : drawStyleDefault;
     }
 });
+
+var portSource = new ol.source.Vector();
+var portStyleCache = boundedStyleCache(128);
+var portLayer = new ol.layer.Vector({
+    source: portSource,
+    zIndex: 20,
+    visible: portsVisible,
+    style: function(feature) {
+        var port = feature.get('port'), selected = !!feature.get('selected');
+        return portStyleCache(JSON.stringify([selected, portNamesVisible ? port.name : '']), function() {
+            return new ol.style.Style({
+                image: new ol.style.Circle({radius: selected ? 8 : 6,
+                    fill: new ol.style.Fill({color: selected ? '#ffffff' : '#f9e2af'}),
+                    stroke: new ol.style.Stroke({color: selected ? '#6c4b00' : '#1a1a2e', width: 2})}),
+                text: portNamesVisible ? new ol.style.Text({text: port.name, offsetY: -15, font: '11px sans-serif',
+                    fill: new ol.style.Fill({color: '#ffffff'}), stroke: new ol.style.Stroke({color: '#1a1a2e', width: 3})}) : undefined
+            });
+        });
+    }
+});
+var portFeatureById = new Map(), portRefreshFrame = null;
+function refreshPortOverlay() {
+    var records = layoutPortRecords.concat(PortOverlay.factoryPorts(drawSource.getFeatures()));
+    var nextIds = new Set();
+    records.forEach(function(port) {
+        if (!Array.isArray(port.center) || !port.center.every(Number.isFinite) || nextIds.has(port.id)) return;
+        nextIds.add(port.id);
+        var feature = portFeatureById.get(port.id);
+        if (feature) { feature.getGeometry().setCoordinates(port.center); feature.set('port', port); }
+        else {
+            feature = new ol.Feature({geometry:new ol.geom.Point(port.center)});
+            feature.set('elementId', port.id);
+            feature.set('port', port);
+            feature.set('layer', Array.isArray(port.layer) ? port.layer.join('/') : String(port.layer || ''));
+            feature.set('selected', false);
+            feature.set('provenance', port.provenance || {});
+            portFeatureById.set(port.id, feature);
+            portSource.addFeature(feature);
+        }
+    });
+    var removedSelected = false;
+    for (var [id, feature] of portFeatureById) {
+        if (nextIds.has(id)) continue;
+        if (selectedFeatures.getArray().includes(feature)) { selectedFeatures.remove(feature); removedSelected = true; }
+        portSource.removeFeature(feature);
+        portFeatureById.delete(id);
+    }
+    document.getElementById('port-count').textContent = nextIds.size + ' port' + (nextIds.size === 1 ? '' : 's');
+    if (removedSelected) onSelectionChanged();
+}
+function requestPortRefresh() {
+    if (portRefreshFrame !== null) return;
+    portRefreshFrame = requestAnimationFrame(function() { portRefreshFrame = null; refreshPortOverlay(); });
+}
+function savePortDisplay() {
+    if (vscode?.setState) vscode.setState(Object.assign({}, vscode.getState() || {}, {portsVisible, portNamesVisible}));
+}
+document.getElementById('ports-visible').checked = portsVisible;
+document.getElementById('port-names-visible').checked = portNamesVisible;
+document.getElementById('ports-visible').onchange = function() {
+    portsVisible = this.checked;
+    portLayer.setVisible(portsVisible);
+    if (!portsVisible && selectedFeatures.getArray().some(f => f.get('port'))) {
+        replaceSelection(selectedFeatures.getArray().filter(f => !f.get('port')));
+        onSelectionChanged();
+    }
+    savePortDisplay();
+};
+document.getElementById('port-names-visible').onchange = function() {
+    portNamesVisible = this.checked;
+    portLayer.changed();
+    savePortDisplay();
+};
+drawSource.on('addfeature', requestPortRefresh);
+drawSource.on('removefeature', requestPortRefresh);
+drawSource.on('changefeature', requestPortRefresh);
 
 // ============================================================
 // Keyboard handling
 // ============================================================
 document.addEventListener('keydown', function(e) {
     if(e.key==='Enter'&&currentMode==='route'&&!/INPUT|TEXTAREA|SELECT|BUTTON/.test(e.target.tagName)){e.preventDefault();finishRouteDraft();return;}
-    if(e.key==='Tab'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&(!shapeProperties.isOpen()||(edaWorkbench&&!edaWorkbench.isActive('properties')))&&selectedFeatures.getLength()===1&&!/INPUT|TEXTAREA|SELECT|BUTTON/.test(e.target.tagName)){e.preventDefault();showShapeProperties();return;}
+    if(e.key==='Tab'&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.target.isContentEditable&&!/INPUT|TEXTAREA|SELECT|BUTTON/.test(e.target.tagName)){
+        if(typeof imageCanvasSelected!=='undefined'&&imageCanvasSelected){e.preventDefault();showSelectedImageProperties();return;}
+        if(selectedShape()&&(!shapeProperties.isOpen()||(edaWorkbench&&!edaWorkbench.isActive('properties')))){e.preventDefault();showShapeProperties();return;}
+    }
     if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
     if(e.target && ((typeof e.target.matches === 'function' && e.target.matches('input,select,textarea')) || e.target.isContentEditable))return;
     if (e.key === 'Control' || e.key === 'Meta') ctrlPressed = true;
@@ -373,7 +476,9 @@ document.addEventListener('keydown', function(e) {
         return;
     }
     if (e.key === 'Escape') {
+        componentChooser.cancelPendingPlacement();
         closeShapeMenu();
+        if(factoryDraft){cancelFactoryPlacement();if(shapeProperties.isOpen())shapeProperties.hide();setMode('select');return;}
         if(!document.getElementById('route-controls').hidden){closeRouteProperties();if(currentMode==='route')setMode('select');return;}
         if(shapeProperties.isOpen()){shapeProperties.hide();cancelShapeTransform();return;}
         primitiveDraft=null;
@@ -429,8 +534,11 @@ document.addEventListener('keyup', function(e) {
 // Selection management
 // ============================================================
 function addToSelection(features) {
+    features=expandFactorySelection(features);
+    var selectedSet=new Set(selectedFeatures.getArray());
     features.forEach(function(f) {
-        if (!selectedFeatures.getArray().includes(f)) {
+        if (!selectedSet.has(f)) {
+            selectedSet.add(f);
             selectedFeatures.push(f);
             f.set('selected', true);
         }
@@ -438,6 +546,7 @@ function addToSelection(features) {
 }
 
 function removeFromSelection(features) {
+    features=expandFactorySelection(features);
     features.forEach(function(f) {
         selectedFeatures.remove(f);
         f.set('selected', false);
@@ -445,6 +554,8 @@ function removeFromSelection(features) {
 }
 
 function replaceSelection(features) {
+    features=expandFactorySelection(features);
+    if(features.length&&typeof imageCanvasSelected!=='undefined')imageCanvasSelected=false;
     selectedFeatures.forEach(function(f) { f.set('selected', false); });
     selectedFeatures.clear();
     features.forEach(function(f) {
@@ -668,6 +779,8 @@ function rewriteLabels(label) {
 // Mode switching
 // ============================================================
 function setMode(mode) {
+    if(componentChooser)componentChooser.cancelPendingPlacement();
+    cancelFactoryPlacement();
     if(reviewTools)reviewTools.cancelMeasure();
     closeShapeMenu();
     cancelShapeTransform();
@@ -706,12 +819,17 @@ function setMode(mode) {
 function deleteDrawn() {
     var drawn = selectedFeatures.getArray().filter(function(f) { return f.get('isDrawn'); });
     if (drawn.length === 0) return;
-    drawn.forEach(function(f) {
-        selectedFeatures.remove(f);
-        drawSource.removeFeature(f);
-    });
+    var wasRestoring=restoringAnnotations;
+    restoringAnnotations=true;
+    try {
+        drawn.forEach(function(f) {
+            selectedFeatures.remove(f);
+            drawSource.removeFeature(f);
+        });
+    } finally { restoringAnnotations=wasRestoring; }
     drawLayer.changed();
     onSelectionChanged();
+    persistAnnotations();
 }
 
 // ============================================================
@@ -722,7 +840,7 @@ function onSelectionChanged() {
     var count = features.length;
     updateWorkOrderTargets();
     if(edaWorkbench)edaWorkbench.selection(count);
-    if(typeof shapeProperties!=='undefined'&&shapeProperties.isOpen()){if(count===1)showShapeProperties();else shapeProperties.hide();}
+    if(typeof shapeProperties!=='undefined'&&shapeProperties.isOpen()){if(selectedShape())showShapeProperties();else shapeProperties.hide();}
     if(typeof cancelShapeTransform==='function')cancelShapeTransform();
 
     syncEditableDrawings();
@@ -731,7 +849,8 @@ function onSelectionChanged() {
     if(drawings.length===1){var intent=drawings[0].get('intent')||{};document.getElementById('intent-action').value=intent.action||'mark_region';document.getElementById('intent-text').value=intent.text||'';}
     if(drawings.length>1){document.getElementById('intent-action').value='inspect';document.getElementById('intent-text').value='';}
     if(count===0) clearIntentRequest();
-    document.getElementById('workflow-status').textContent=count ? count+' selected ('+drawings.length+' drawings). Copy to your agent.' : 'Select an element, or draw a region.';
+    var ports=features.filter(function(f){return f.get('port');}).length;
+    document.getElementById('workflow-status').textContent=count ? count+' selected ('+ports+' ports, '+drawings.length+' drawings). Copy to your agent.' : 'Select an element, port, or draw a region.';
     var hasDrawn = count > 0 && features.some(function(f) { return f.get('isDrawn'); });
     modifyInteraction.setActive(hasDrawn);
     translateInteraction.setActive(hasDrawn);
@@ -766,6 +885,7 @@ function componentsFromFeatures(features) {
             provId: f.get("elementId") || f.get("annotationId") || String(f.ol_uid),
             geometry: exactGeometry(f),
             primitive: f.get('primitive'), factory:f.get('factory'), route:f.get('route'),
+            ...(f.get('port') ? { port: f.get('port') } : {}),
             intent: f.get("intent"),
             layer: f.get('layer') || '',
             bbox: geomExtentToBbox(extent),
@@ -798,6 +918,9 @@ var highlightStyle = new ol.style.Style({
     fill: new ol.style.Fill({ color: 'rgba(255,255,255,0.3)' })
 });
 
+var vectorStyleCache = boundedStyleCache(256);
+var hiddenVectorStyle = new ol.style.Style({});
+
 var vectorLayer = new ol.layer.Vector({
     source: source,
     style: function(feature) {
@@ -805,7 +928,7 @@ var vectorLayer = new ol.layer.Vector({
         var labelText = feature.get('label');
         if (selected) {
             if (labelText) {
-                return new ol.style.Style({
+                return vectorStyleCache(JSON.stringify(['selected', labelText]), function(){return new ol.style.Style({
                     stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 }),
                     fill: new ol.style.Fill({ color: 'rgba(255,255,255,0.3)' }),
                     text: new ol.style.Text({
@@ -814,26 +937,26 @@ var vectorLayer = new ol.layer.Vector({
                         fill: new ol.style.Fill({ color: '#f9e2af' }),
                         stroke: new ol.style.Stroke({ color: '#1a1a2e', width: 2 })
                     })
-                });
+                });});
             }
             return highlightStyle;
         }
         var color = feature.get('color') || '#fff';
         var visible = feature.get('visible') !== false;
-        if (!visible) return new ol.style.Style({});
-        var style = new ol.style.Style({
-            stroke: new ol.style.Stroke({ color: color, width: 1 }),
-            fill: new ol.style.Fill({ color: color + '80' })
-        });
-        if (labelText) {
-            style.setText(new ol.style.Text({
+        if (!visible) return hiddenVectorStyle;
+        return vectorStyleCache(JSON.stringify(['normal', color, labelText || '']), function(){
+            var style = new ol.style.Style({
+                stroke: new ol.style.Stroke({ color: color, width: 1 }),
+                fill: new ol.style.Fill({ color: color + '80' })
+            });
+            if (labelText) style.setText(new ol.style.Text({
                 text: labelText,
                 font: '10px monospace',
                 fill: new ol.style.Fill({ color: '#f9e2af' }),
                 stroke: new ol.style.Stroke({ color: '#1a1a2e', width: 2 })
             }));
-        }
-        return style;
+            return style;
+        });
     }
 });
 
@@ -842,14 +965,16 @@ var vectorLayer = new ol.layer.Vector({
 // ============================================================
 var map = new ol.Map({
     target: 'map',
-    layers: [vectorLayer, drawLayer],
+    layers: [vectorLayer, drawLayer, portLayer],
     view: new ol.View({ center: [0, 0], zoom: 2, minZoom: -20, maxZoom: 40 }),
     controls: []
 });
 
 // Select interaction -- multi-select capable
 var selectClick = new ol.interaction.Select({
-    layers: [vectorLayer, drawLayer],
+    layers: [portLayer, vectorLayer, drawLayer],
+    hitTolerance: 8,
+    condition:function(event){return Date.now() >= (factorySelectionResumeAt||0) && ol.events.condition.singleClick(event);},
     style: null,  // use layer style function
     multi: true
 });
@@ -1125,9 +1250,11 @@ for(var filterId of ['work-order-search','work-order-filter'])document.getElemen
 document.getElementById('instructions-refresh').onclick=function(){instructionAction('refresh');};
 document.getElementById('copy-open-instructions').onclick=function(){instructionAction('copyOpen');};
 document.getElementById('queue-instruction').onclick=function(){
+    if(factoryDraft){instructionFeedback('Click the canvas to place this component before adding its work order.');return;}
     if(pendingWorkOrder)return;
     var request=currentIntent(),features=selectedFeatures.getArray();
     if(!features.length||!request.text.trim()){instructionFeedback('Select elements or a drawn region, then describe the requirement.');return;}
+    if(features.some(function(f){var port=f.get('port');return port&&port.source==='factory';})){instructionFeedback('Placed component ports can be copied. Select the component geometry to create a work order.');return;}
     if(!request.targetIds.length)request.targetIds=[...new Set(features.flatMap(f=>(f.get('intent')||{}).targetIds||[]))];
     if(!vscode)return;
     var requestId='work-order-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
@@ -1139,24 +1266,60 @@ document.getElementById('intent-text').addEventListener('keydown',function(event
         event.preventDefault();event.stopPropagation();document.getElementById('queue-instruction').click();
     }
 });
-var componentChooser=ComponentChooser.mount({container:document.getElementById('component-catalog'),postMessage:function(message){if(message.type==='previewComponent'){factoryPreviewContext={};var intent=currentIntent();intent.action='add';factoryPreviewContext[message.requestId]={documentPath:currentGdsPath,layoutHash:currentLayoutHash,intent:intent};}if(vscode)vscode.postMessage(message);},onInsert:function(result){
+var factoryDraft=null,factoryPointerFrame=null,factoryPointerCoordinate=null,factorySelectionResumeAt=0;
+var factoryGhostSource=new ol.source.Vector();
+var factoryGhostLayer=new ol.layer.Vector({source:factoryGhostSource,style:drawStyleSelected});
+map.addLayer(factoryGhostLayer);
+function cancelFactoryPlacement(){if(factoryPointerFrame!==null)cancelAnimationFrame(factoryPointerFrame);factoryPointerFrame=null;factoryPointerCoordinate=null;if(!factoryDraft)return;factoryDraft=null;factoryGhostSource.clear();map.getTargetElement().style.cursor='';}
+function factoryShapes(result,origin){
     try{
         if(result.documentPath!==currentGdsPath||result.layoutHash!==currentLayoutHash)throw new Error('Layout changed. Preview the component again before inserting.');
-        var origin=map.getView().getCenter().slice(),groupId=('drawing-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)),intent=result.intent;
+        var groupId=('drawing-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)),intent=currentIntent();intent.action='add';
         var shapes=[];(result.geojson.features||[]).forEach(function(item){
             var geometries=item.geometry.type==='MultiPolygon'?item.geometry.coordinates.map(c=>({type:'Polygon',coordinates:c})):[item.geometry];
             geometries.forEach(function(g){if(g.type!=='Polygon')return;var geom=gdsGeoJsonFmt.readGeometry(g);geom.translate(origin[0],origin[1]);
                 var f=new ol.Feature({geometry:geom});f.set('isDrawn',true);f.set('annotationId',('drawing-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)));f.set('shapeType','polygon');f.set('intent',intent);
                 var props=item.properties||{};f.set('layer',String(props.layer===undefined?0:props.layer)+'/'+String(props.data_type||0));
-                f.set('factory',{name:result.name,settings:result.settings,groupId:groupId,origin:origin,sourceGeometry:g});shapes.push(f);
+                f.set('factory',{name:result.name,settings:result.settings,library:result.library,groupId:groupId,origin:origin,sourceGeometry:g,sourceLayer:f.get('layer'),ports:result.ports||[]});shapes.push(f);
             });
         });
         if(!shapes.length)throw new Error('This component has no supported polygon geometry.');
         shapes.forEach(function(f,i){f.get('factory').pieceIndex=i;f.get('factory').pieceCount=shapes.length;});
-        drawSource.addFeatures(shapes);setMode('select');replaceSelection(shapes);onSelectionChanged();persistAnnotations();
-        instructionFeedback('Component proposal inserted and queued. Review its reference in Work orders.');
-    }catch(error){instructionFeedback(error.message);}
-}});
+        return shapes;
+    }catch(error){instructionFeedback(error.message);return null;}
+}
+function insertFactoryAtCenter(result){
+    var shapes=factoryShapes(result,map.getView().getCenter().slice());if(!shapes)return;
+    cancelFactoryPlacement();drawSource.addFeatures(shapes);setMode('select');replaceSelection(shapes);onSelectionChanged();persistAnnotations();map.getTargetElement().focus();
+}
+function beginFactoryPlacement(result){
+    var origin=map.getView().getCenter().slice(),shapes=factoryShapes(result,origin);if(!shapes)return;
+    if(shapeProperties.isOpen())shapeProperties.hide();
+    setMode('factory');factoryDraft={shapes:shapes,origin:origin};factoryGhostSource.addFeatures(shapes);
+    map.getTargetElement().style.cursor='crosshair';map.getTargetElement().focus();
+    instructionFeedback('Click the canvas to place '+result.name+'. Tab edits size/rotation; Escape cancels.');
+}
+function flushFactoryPointer(){
+    factoryPointerFrame=null;var point=factoryPointerCoordinate;factoryPointerCoordinate=null;
+    if(!factoryDraft||!point||shapeProperties.isOpen())return;
+    var dx=point[0]-factoryDraft.origin[0],dy=point[1]-factoryDraft.origin[1];
+    if(dx||dy)factoryDraft.shapes.forEach(f=>f.getGeometry().translate(dx,dy));factoryDraft.origin=point;
+}
+map.on('pointermove',function(event){
+    if(!factoryDraft||shapeProperties.isOpen())return;
+    factoryPointerCoordinate=event.coordinate.slice();
+    if(factoryPointerFrame===null)factoryPointerFrame=requestAnimationFrame(flushFactoryPointer);
+});
+map.on('click',function(event){
+    if(!factoryDraft)return;
+    var draft=factoryDraft;
+    factorySelectionResumeAt=Date.now()+350;
+    // With properties open, preserve the numeric placement; otherwise use the mouse anchor.
+    if(!shapeProperties.isOpen()){var dx=event.coordinate[0]-draft.origin[0],dy=event.coordinate[1]-draft.origin[1];draft.shapes.forEach(f=>f.getGeometry().translate(dx,dy));}
+    cancelFactoryPlacement();drawSource.addFeatures(draft.shapes);
+    setTimeout(function(){setMode('select');replaceSelection(draft.shapes);onSelectionChanged();persistAnnotations();map.getTargetElement().focus();instructionFeedback('Component placed. Tab edits it; Add work order sends its reference and geometry.');},0);
+});
+var componentChooser=ComponentChooser.mount({container:document.getElementById('component-catalog'),postMessage:function(message){if(message.type==='previewComponent'){factoryPreviewContext={};var intent=currentIntent();intent.action='add';factoryPreviewContext[message.requestId]={documentPath:currentGdsPath,layoutHash:currentLayoutHash,intent:intent};}if(vscode)vscode.postMessage(message);},onInsert:insertFactoryAtCenter,onPlace:beginFactoryPlacement,onRefresh:function(){cancelFactoryPlacement();factoryPreviewContext={};}});
 // Snapshot targets at preview time, not when asynchronous geometry later arrives.
 var chooserPost=componentChooser.handleMessage;
 var factoryPreviewContext={};
@@ -1234,7 +1397,7 @@ Object.keys(drawInteractions).forEach(function(key) {
 
 // Only selected ordinary drawings allow free vertex edits. Routes use constrained editing.
 var editableDrawings=new ol.Collection(),movableDrawings=new ol.Collection();
-function syncEditableDrawings(){if(!editableDrawings)return;editableDrawings.clear();movableDrawings.clear();selectedFeatures.getArray().filter(f=>f.get('isDrawn')).forEach(function(f){movableDrawings.push(f);if(!f.get('route'))editableDrawings.push(f);});}
+function syncEditableDrawings(){if(!editableDrawings)return;editableDrawings.clear();movableDrawings.clear();selectedFeatures.getArray().filter(f=>f.get('isDrawn')).forEach(function(f){movableDrawings.push(f);if(!f.get('route')&&!f.get('factory'))editableDrawings.push(f);});}
 var modifyInteraction = new ol.interaction.Modify({
     features: editableDrawings,
     style: new ol.style.Style({
@@ -1258,7 +1421,25 @@ modifyInteraction.on('modifyend',function(){usageEvent('shape.edit',{phase:'resu
 translateInteraction.on('translateend',function(){usageEvent('shape.edit',{phase:'result',outcome:'success',kind:'move'});persistAnnotations();});
 drawSource.on('removefeature',function(){persistAnnotations();});
 var shapeTransformMode=null,shapeDrag=null;
-function selectedShape(){return selectedFeatures.getLength()===1?selectedFeatures.item(0):null;}
+function expandFactorySelection(features){
+    var result=new Set(features),groups=new Set(features.map(f=>f.get('factory')?.groupId).filter(Boolean));
+    if(groups.size)drawSource.getFeatures().forEach(function(piece){if(groups.has(piece.get('factory')?.groupId))result.add(piece);});
+    return Array.from(result);
+}
+// A transient adapter lets existing numeric and mouse transforms act on every
+// polygon of a factory instance, without merging layers or changing saved IDs.
+function selectedShape(){
+    var pieces=factoryDraft?factoryDraft.shapes.slice():selectedFeatures.getArray().slice();if(pieces.some(f=>f.get('port')))return null;if(pieces.length===1)return pieces[0];
+    var group=pieces[0]?.get('factory')?.groupId;
+    if(!group||!pieces.every(f=>f.get('factory')?.groupId===group))return null;
+    return {
+        get:function(key){return key==='annotationId'?pieces[0].get('factory').name:pieces[0].get(key);},
+        set:function(key,value){pieces.forEach(f=>f.set(key,value));},
+        getGeometry:function(){return new ol.geom.GeometryCollection(pieces.map(f=>f.getGeometry().clone()));},
+        setGeometry:function(geometry){geometry.getGeometries().forEach((g,i)=>pieces[i].setGeometry(g));},
+        pieces:pieces.slice()
+    };
+}
 function shapeMetrics(f){
     var g=f.getGeometry(),center=ol.extent.getCenter(g.getExtent()),rotation=f.get('editRotation')??f.get('primitive')?.rotationDeg??0,local=g.clone();local.rotate(-rotation*Math.PI/180,center);var box=local.getExtent();
     return {editable:!!f.get('isDrawn'),label:f.get('annotationId')||f.get('elementId'),x:center[0],y:center[1],width:box[2]-box[0],height:box[3]-box[1],rotation:rotation};
@@ -1267,9 +1448,9 @@ function showShapeProperties(){if(edaWorkbench)edaWorkbench.activate('properties
 function cancelShapeTransform(){
     if(typeof shapePointer==='undefined')return;
     if(shapeDrag){shapeDrag.feature.setGeometry(shapeDrag.geometry);shapeDrag.feature.set('editRotation',shapeDrag.rotation);shapeDrag=null;}
-    shapeTransformMode=null;shapePointer.setActive(false);map.getTargetElement().style.cursor='';
+    shapeTransformMode=null;shapePointer.setActive(false);shapePointer.handlingDownUpSequence=false;map.getTargetElement().style.cursor='';
 }
-function finishShapeEdit(feature){persistAnnotations();if(shapeProperties.isOpen())showShapeProperties();document.getElementById('workflow-status').textContent='Shape updated. Exact geometry saved as a review instruction.';}
+function finishShapeEdit(feature){if(!factoryDraft)persistAnnotations();if(shapeProperties.isOpen())showShapeProperties();document.getElementById('workflow-status').textContent=factoryDraft?'Placement preview updated. Click canvas to place; Escape cancels.':'Shape updated. Exact geometry saved as a review instruction.';}
 var shapeProperties=ShapeProperties.mount({container:document.getElementById('shape-properties'),onClose:function(){cancelShapeTransform();onSelectionChanged();map.getTargetElement().focus();},onApply:function(values){
     var f=selectedShape();if(!f||!f.get('isDrawn'))throw Error('Select one proposal to edit.');
     if(f.get('route'))throw Error('Use route properties to preserve Manhattan geometry.');
@@ -1287,7 +1468,7 @@ var shapeProperties=ShapeProperties.mount({container:document.getElementById('sh
 var shapePointer=new ol.interaction.Pointer({
     handleDownEvent:function(event){
         var f=selectedShape();if(!shapeTransformMode||!f||!f.get('isDrawn')||f.get('route'))return false;
-        var hit=map.forEachFeatureAtPixel(event.pixel,function(feature){return feature===f;},{layerFilter:layer=>layer===drawLayer,hitTolerance:8});if(!hit)return false;
+        var hit=map.forEachFeatureAtPixel(event.pixel,function(feature){return feature===f||(f.pieces&&f.pieces.includes(feature));},{layerFilter:layer=>layer===drawLayer||layer===factoryGhostLayer,hitTolerance:8});if(!hit)return false;
         var center=ol.extent.getCenter(f.getGeometry().getExtent());
         shapeDrag={feature:f,geometry:f.getGeometry().clone(),rotation:f.get('editRotation')??f.get('primitive')?.rotationDeg??0,center:center,start:event.coordinate.slice(),changed:false};return true;
     },
@@ -1481,7 +1662,7 @@ function contextMenuOpen(clientX, clientY, feature, kind, pixel) {
     if(activeTool){contextMenuActionVisible('cancel-tool',true);}
     else if(image){['image-properties','image-fit','image-place-global','image-place-view','image-remove'].forEach(function(a){contextMenuActionVisible(a,true);});if(hasSelection)contextMenuActionVisible('clear-selection',true);}
     else if(feature){
-        contextMenuActionVisible('inspect-properties',selectedFeatures.getLength()===1); contextMenuActionVisible('copy-selection',true); contextMenuActionVisible('new-work-order',true); contextMenuActionVisible('fit-selection',true); contextMenuActionVisible('fit-view',true);
+        contextMenuActionVisible('inspect-properties',!!selectedShape()); contextMenuActionVisible('copy-selection',true); contextMenuActionVisible('new-work-order',true); contextMenuActionVisible('fit-selection',true); contextMenuActionVisible('fit-view',true);
         if(sourceRef)contextMenuActionVisible('source-navigation',true);
         if(feature.get('isDrawn')){contextMenuActionVisible('edit-drawing',selectedFeatures.getLength()===1);contextMenuActionVisible('delete-drawing',true);}
         if(hasSelection)contextMenuActionVisible('clear-selection',true);
@@ -1504,7 +1685,7 @@ function contextMenuFeatureAtPixel(pixel) {
 function contextMenuImageAtCoordinate(coord) {
     if(imageBusy)return false;
     for(var i=microImages.length-1;i>=0;i--){var item=microImages[i],layer=item._layer;
-        if(item.visible!==false&&item.opacity>0&&layer&&layer.getVisible()&&ol.extent.containsCoordinate(layer.getSource().getImageExtent(),coord)){selectMicroImage(i);return true;}}
+        if(item.visible!==false&&item.opacity>0&&layer&&layer.getVisible()&&ol.extent.containsCoordinate(layer.getSource().getImageExtent(),coord)){selectMicroImage(i);imageCanvasSelected=true;return true;}}
     return false;
 }
 function contextMenuFitSelection() { var ext=contextSelectionExtent();if(ext)map.getView().fit(ext,{padding:[40,40,40,40],duration:300}); }
@@ -1575,6 +1756,7 @@ function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
     var prevCenter = isReload ? map.getView().getCenter() : null;
     var prevZoom = isReload ? map.getView().getZoom() : null;
 
+    cancelFactoryPlacement();componentChooser.invalidateCache();factoryPreviewContext={};
     currentGdsPath = gdsPath;
     if(edaWorkbench)edaWorkbench.document(gdsPath);
     updateWorkOrderTargets();
@@ -1585,6 +1767,9 @@ function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
     restoringAnnotations = true;
     drawSource.clear();
     selectedFeatures.clear();
+    portSource.clear();
+    portFeatureById.clear();
+    layoutPortRecords = PortOverlay.layoutPorts(geojson);
     allFeatures = [];
     layerColors = {};
 
@@ -1607,8 +1792,8 @@ function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
             bbox: props.bbox || []
         });
         allFeatures.push(f);
-        source.addFeature(f);
     });
+    source.addFeatures(allFeatures);
 
     // Recalculate map size before fitting — the map may have been
     // created before the webview container had its final dimensions.
@@ -1639,6 +1824,7 @@ function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
     });
 
     restoringAnnotations = false;
+    refreshPortOverlay();
     var stale = drawSource.getFeatures().some(function(f){var i=f.get('intent');return i && i.snapshot && i.snapshot!==currentLayoutHash;});
     document.getElementById('workflow-status').textContent = stale ? 'Layout changed: review annotation targets.' : (allFeatures.length ? allFeatures.length + ' elements. Select, draw, then copy.' : 'This layout contains no visible geometry.');
     if (invalidAnnotations) document.getElementById('workflow-status').textContent += ' ' + invalidAnnotations + ' invalid annotation(s) could not be restored.';
@@ -1906,6 +2092,7 @@ window.addEventListener('message', function(event) {
             if(message.layoutHash!==currentLayoutHash)break;
             restoringAnnotations=true;try{replaceSelection([]);drawSource.clear();message.annotations.forEach(function(a){drawSource.addFeature(featureFromSavedAnnotation(a));});onSelectionChanged();}finally{restoringAnnotations=false;}break;
         case 'layoutLoading':
+            cancelFactoryPlacement();
             if(reviewTools)reviewTools.cancelMeasure();
             workOrdersLoading=true;lastWorkOrderMessage=null;
             closeCanvasContextMenu();
@@ -1989,8 +2176,23 @@ window.addEventListener('message', function(event) {
 var microImg = null;   // {img: HTMLImageElement, name, cx, cy, umPerPx, rotDeg, opacity}
 var microLayer = null; // ol.layer.Image (recreated on transform change)
 var microImages = []; // bottom-to-top; microImg/microLayer are the selected image aliases
+// Set when the last canvas interaction targeted an image.  The controller's
+// keyboard handler uses this to route Tab to the image inspector instead of a
+// layout feature inspector.
+var imageCanvasSelected = false;
 function refreshImageStack(){microImages.forEach(function(item,i){if(item._layer)item._layer.setZIndex(-10000+i);});}
-function selectMicroImage(index){if(imageBusy)return;microImg=microImages[index]||null;microLayer=microImg?microImg._layer:null;imgMoveMode=false;imageFeedback='';updateImageControls();}
+function selectMicroImage(index){if(imageBusy)return;microImg=microImages[index]||null;microLayer=microImg?microImg._layer:null;imageCanvasSelected=!!microImg;imgMoveMode=false;imageFeedback='';updateImageControls();}
+function showSelectedImageProperties(){
+    if(!microImg)return false;
+    imageCanvasSelected=true;
+    if(edaWorkbench)edaWorkbench.activate('images');
+    updateImageControls();
+    var panel=document.getElementById('image-controls');
+    if(panel)panel.hidden=false;
+    var chooser=document.getElementById('image-select');
+    if(chooser&&document.activeElement!==chooser)chooser.focus();
+    return true;
+}
 function reorderMicroImage(delta){if(imageBusy||!microImg)return;var i=microImages.indexOf(microImg),j=i+delta;if(j<0||j>=microImages.length)return;microImages.splice(i,1);microImages.splice(j,0,microImg);microImages.forEach(function(item,k){item._order=k;});refreshImageStack();updateImageControls();vscode&&vscode.postMessage({type:'reorderImages',layoutHash:currentLayoutHash,imageIds:microImages.map(function(x){return x.imageId;})});}
 function placeMicroImage(scope){
     if(!microImg||imageBusy)return;
@@ -2075,7 +2277,7 @@ function removeMicroImage() {
     if(imageBusy)return;if(microImg)clearTimeout(microImg._saveTimer);
     if(microImg&&microImg.imageId&&vscode)vscode.postMessage({type:'clearImageState',imageId:microImg.imageId});
     var index=microImages.indexOf(microImg);if(index>=0)microImages.splice(index,1);
-    if(microLayer)map.removeLayer(microLayer);microLayer=null;microImg=null;imgMoveMode=false;imageFeedback='';refreshImageStack();selectMicroImage(Math.min(index,microImages.length-1));updateImageControls();
+    if(microLayer)map.removeLayer(microLayer);microLayer=null;microImg=null;imageCanvasSelected=false;imgMoveMode=false;imageFeedback='';refreshImageStack();selectMicroImage(Math.min(index,microImages.length-1));updateImageControls();
 }
 
 function imgStatus(text) {
@@ -2106,6 +2308,7 @@ function insertMicroImage(dataUrl, name, imageId, savedState, append, order) {
             opacity: 1, visible:true, locked:true, imageId:imageId||null,_order:Number.isFinite(order)?order:serial,
             quality:{status:'unverified',boundaryRmsPx:null,markerCount:0},options:MicroscopeOverlay.defaultOptions()
         };
+        imageCanvasSelected=true;
         imageFeedback='';imageSaveStatus='';
         if(savedState){try{MicroscopeOverlay.restore(microImg,savedState);imageSaveStatus='Restored saved placement';}catch(e){imageFeedback=e.message;}}
         microImages.push(microImg);microImages.sort(function(a,b){return a._order-b._order;});
@@ -2132,7 +2335,7 @@ function round4(v) { return Math.round(v * 10000) / 10000; }
 
 /** Recreate the OL image layer from the current transform (rotation is baked
  *  into an offscreen canvas because ImageStatic is axis-aligned). */
-function renderMicroLayer() {
+function renderMicroLayer(updateUi) {
     if (!microImg) return;
     var rendered=MicroscopeOverlay.render(microImg.img,microImg);
     if (!microLayer || microLayer._rendered !== rendered) {
@@ -2142,8 +2345,9 @@ function renderMicroLayer() {
     }
     microLayer.setOpacity(microImg.opacity);
     microLayer.setVisible(microImg.visible!==false);
-    microImg._layer=microLayer;refreshImageStack();
-    updateImageControls();
+    microImg._layer=microLayer;
+    if(updateUi!==false)refreshImageStack();
+    if(updateUi!==false)updateImageControls();
 }
 
 function reportTransform(note) {
@@ -2164,7 +2368,7 @@ function reportTransform(note) {
 
 // ---- manual adjustment (img-move mode) ----
 (function () {
-    var dragging = false, lastPx = null;
+    var dragging = false, lastPx = null, dragFrame = null;
     map.on('pointerdown', function (e) {
         if (!imgMoveMode || !microImg || microImg.locked!==false || imageBusy) return;
         dragging = true; lastPx = e.pixel;
@@ -2176,10 +2380,19 @@ function reportTransform(note) {
         var res = map.getView().getResolution();
         microImg.cx += dxPx * res;
         microImg.cy -= dyPx * res;
-        renderMicroLayer();
+        // Keep every displacement, but warp the image at most once per frame.
+        if (dragFrame === null) dragFrame = requestAnimationFrame(function () {
+            dragFrame = null;
+            if (dragging) renderMicroLayer(false);
+        });
     });
     map.on('pointerup', function () {
-        if (dragging) { dragging = false; reportTransform('moved'); }
+        if (dragging) {
+            dragging = false;
+            if (dragFrame !== null) { cancelAnimationFrame(dragFrame); dragFrame = null; }
+            renderMicroLayer(true);
+            reportTransform('moved');
+        }
     });
     map.getViewport().addEventListener('wheel', function (e) {
         if (!imgMoveMode || !microImg || microImg.locked!==false || imageBusy || !e.shiftKey) return;
@@ -5813,6 +6026,20 @@ window.__phaseSeedApply = function (photoMapPt, layoutMapPt) {
 };
 map.on('singleclick', function (evt) {
     if (phaseSeedArmed) window.__phaseSeedClick(evt.coordinate);
+});
+// Give layout and drawn features priority over the microscope underlay.  When
+// the click lands on image-only canvas space, make the image the transient
+// selection so Tab can open its properties inspector.
+map.on('click', function (evt) {
+    if (phaseSeedArmed || currentMode !== 'select' || imgMoveMode || imageBusy) return;
+    if (contextMenuFeatureAtPixel(evt.pixel)) { imageCanvasSelected=false; return; }
+    if (contextMenuImageAtCoordinate(evt.coordinate)) {
+        clearSelection();
+        imageCanvasSelected=true;
+        map.getTargetElement().focus();
+        return;
+    }
+    imageCanvasSelected=false;
 });
 
 // ============================================================

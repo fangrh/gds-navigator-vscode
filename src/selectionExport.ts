@@ -66,18 +66,87 @@ const validGeometry = (value: any): boolean => {
     }
     return false;
 };
+function validLibrary(v: any): boolean {
+    return !!v && v.module === 'gds_components' && typeof v.exportName === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(v.exportName) && v.exportName.length <= 152;
+}
 function validFactory(v: any): boolean {
     return !!v && typeof v === 'object' && typeof v.name === 'string' && typeof v.groupId === 'string' &&
         !!v.settings && typeof v.settings === 'object' && !Array.isArray(v.settings) && finitePosition(v.origin) &&
+        (v.library === undefined ? !v.name.startsWith('project:') : validLibrary(v.library) && v.name === `project:${v.library.exportName}`) &&
         v.sourceGeometry?.type === 'Polygon' && validGeometry(v.sourceGeometry) && Number.isInteger(v.pieceIndex) && Number.isInteger(v.pieceCount) && v.pieceIndex >= 0 && v.pieceIndex < v.pieceCount;
 }
-function factoryInfo(c: any): any {
+type RigidTransform = { rotationDeg: number; translation: [number, number] };
+const FACTORY_GEOMETRY_TOLERANCE = 1e-7;
+function fitRigidTransform(source: any, target: any, tolerance = FACTORY_GEOMETRY_TOLERANCE): RigidTransform | undefined {
+    if (source?.type !== 'Polygon' || target?.type !== 'Polygon') return undefined;
+    const sourceRing = source.coordinates?.[0], targetRing = target.coordinates?.[0];
+    if (!Array.isArray(sourceRing) || !Array.isArray(targetRing) || sourceRing.length !== targetRing.length || sourceRing.length < 4) return undefined;
+    const distance = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const sx = sourceRing[1][0] - sourceRing[0][0], sy = sourceRing[1][1] - sourceRing[0][1];
+    const tx = targetRing[1][0] - targetRing[0][0], ty = targetRing[1][1] - targetRing[0][1];
+    const sourceLength = Math.hypot(sx, sy), targetLength = Math.hypot(tx, ty);
+    if (!Number.isFinite(sourceLength) || sourceLength === 0 || Math.abs(sourceLength - targetLength) > tolerance) return undefined;
+    const rotation = Math.atan2(ty, tx) - Math.atan2(sy, sx), cos = Math.cos(rotation), sin = Math.sin(rotation);
+    const translation: [number, number] = [targetRing[0][0] - (cos * sourceRing[0][0] - sin * sourceRing[0][1]), targetRing[0][1] - (sin * sourceRing[0][0] + cos * sourceRing[0][1])];
+    const matches = sourceRing.every((point: number[], i: number) => {
+        const x = cos * point[0] - sin * point[1] + translation[0], y = sin * point[0] + cos * point[1] + translation[1];
+        return distance([x, y], targetRing[i]) <= tolerance;
+    });
+    return matches ? { rotationDeg: rotation * 180 / Math.PI, translation } : undefined;
+}
+function rigidGeometryMatches(source: any, target: any, transform: RigidTransform, tolerance = FACTORY_GEOMETRY_TOLERANCE): boolean {
+    if (source?.type !== 'Polygon' || target?.type !== 'Polygon' || source.coordinates?.length !== target.coordinates?.length) return false;
+    const cos = Math.cos(transform.rotationDeg * Math.PI / 180), sin = Math.sin(transform.rotationDeg * Math.PI / 180);
+    return source.coordinates.every((sourceRing: number[][], ringIndex: number) => {
+        const targetRing = target.coordinates[ringIndex];
+        return Array.isArray(sourceRing) && Array.isArray(targetRing) && sourceRing.length === targetRing.length && sourceRing.every((point, i) => {
+            const x = cos * point[0] - sin * point[1] + transform.translation[0], y = sin * point[0] + cos * point[1] + transform.translation[1];
+            return Math.hypot(x - targetRing[i][0], y - targetRing[i][1]) <= tolerance;
+        });
+    });
+}
+function safeSettingsJson(settings: any): string | undefined {
+    try {
+        const encoded = JSON.stringify(settings);
+        return encoded === undefined ? undefined : encoded;
+    } catch { return undefined; }
+}
+function factoryGroupInfo(group: any[]): any | undefined {
+    const valid = group.filter(c => validFactory(c.factory));
+    if (!valid.length) return undefined;
+    const first = valid[0].factory;
+    const firstSettingsJson = safeSettingsJson(first.settings);
+    const sourceLayerMatches = valid.every(c => !c.factory.sourceLayer || String(c.layer) === String(c.factory.sourceLayer));
+    const geometryValid = valid.every(c => validGeometry(c.geometry));
+    const complete = valid.length === first.pieceCount && new Set(valid.map(c => c.factory.pieceIndex)).size === first.pieceCount && sourceLayerMatches && geometryValid && valid.every(c => c.factory.groupId === first.groupId && c.factory.name === first.name && safeSettingsJson(c.factory.library) === safeSettingsJson(first.library) && safeSettingsJson(c.factory.settings) === firstSettingsJson);
+    const byIndex = new Map(valid.map(c => [c.factory.pieceIndex, c]));
+    const transform = complete ? fitRigidTransform(byIndex.get(0)?.factory.sourceGeometry, byIndex.get(0)?.geometry) : undefined;
+    const rigid = !!transform && [...byIndex.values()].every(c => rigidGeometryMatches(c.factory.sourceGeometry, c.geometry, transform));
+    const settingsJson = firstSettingsJson;
+    const ports = valid.find(c => Array.isArray(c.factory.ports))?.factory.ports;
+    const base: any = { name: first.name, settings: first.settings, group_id: first.groupId, piece_count: first.pieceCount, ...(first.library ? { library: first.library, source_file: 'gds_components.py', execution_context: 'Run with the project root on the Python import path.' } : {}), ...(ports ? { ports, ports_frame: 'component_local' } : {}) };
+    if (rigid && transform && settingsJson !== undefined) {
+        const name = JSON.stringify(first.name), settings = JSON.stringify(settingsJson);
+        base.status = 'rigid_factory_reference';
+        base.transform = { rotation_deg: transform.rotationDeg, translation: transform.translation };
+        const lookup = first.library ? `COMPONENTS[${JSON.stringify(first.library.exportName)}]` : name;
+        base.code = [`import json`, `import gdsfactory as gf`, ...(first.library ? ['from gds_components import COMPONENTS'] : []), `component = gf.get_component(${lookup}, settings=json.loads(${settings}))`, `ref = parent.add_ref(component)`, `ref.drotate(${JSON.stringify(transform.rotationDeg)})`, `ref.dmove((${JSON.stringify(transform.translation[0])}, ${JSON.stringify(transform.translation[1])}))`].join('\n');
+        base.geometry_authority = 'factory_reference_matches_current_geometry';
+    } else {
+        base.status = 'geometry_authoritative';
+        base.geometry_authority = 'exact_current_polygons';
+        base.reason = !geometryValid ? 'invalid_current_geometry' : !sourceLayerMatches ? 'source_layer_mismatch' : !complete ? 'incomplete_or_inconsistent_factory_group' : settingsJson === undefined ? 'settings_are_not_json_serializable' : 'current_geometry_is_scaled_or_deformed';
+    }
+    return base;
+}
+function factoryInfo(c: any, groupInfo?: any): any {
     if (!validFactory(c.factory)) return {};
     const factory = c.factory;
     const translated = JSON.parse(JSON.stringify(factory.sourceGeometry));
-    translated.coordinates = translated.coordinates.map((ring: number[][]) => ring.map(p => [p[0]+factory.origin[0],p[1]+factory.origin[1]]));
-    return { factory_proposal: { name: factory.name, settings: factory.settings, group_id: factory.groupId, piece_index: factory.pieceIndex, piece_count: factory.pieceCount,
+    translated.coordinates = translated.coordinates.map((ring: number[][]) => ring.map(p => [p[0] + factory.origin[0], p[1] + factory.origin[1]]));
+    return { factory_proposal: { name: factory.name, settings: factory.settings, library: factory.library, group_id: factory.groupId, piece_index: factory.pieceIndex, piece_count: factory.pieceCount,
         origin: factory.origin, parameter_status: JSON.stringify(translated) === JSON.stringify(c.geometry) ? 'original_factory_geometry' : 'modified_geometry',
+        ...(groupInfo ? { group_construction: { group_id: groupInfo.group_id, status: groupInfo.status, geometry_authority: groupInfo.geometry_authority } } : {}),
         interpretation: 'One factory instance for this entire group, not one per polygon. Exact current geometry and target layer are authoritative. Reconcile edits before using the original factory settings.' } };
 }
 export function validateIntent(value: unknown): value is { action?: string; text?: string; targetIds?: string[]; snapshot?: string; documentPath?: string } {
@@ -99,6 +168,7 @@ export function selectionDocument(gdsPath: string, hash: string | undefined, com
     const selectedIds = new Set(selected.map(c => String(c.provId)));
     const actions = new Map<string, Set<string>>();
     const element = (c: any) => ({ id: c.provId, layer: c.layer, bbox: c.bbox, geometry: c.geometry,
+        ...(c.port ? { port: c.port } : {}),
         ...(primitiveInfo(c) || {}),
         provenance_status: c.provenance?.source_resolution || (c.provenance?.file ? 'source_reference_unverified' : 'unavailable'), provenance: c.provenance || {} });
     const bind = (subject: string, action: string, ids: string[], snapshot?: string, documentPath?: string) => {
@@ -120,6 +190,13 @@ export function selectionDocument(gdsPath: string, hash: string | undefined, com
         }
         return unresolved ? 'unresolved' : 'current_snapshot';
     };
+    const factoryGroups = new Map<string, any[]>();
+    components.filter(c => c.drawn && validFactory(c.factory)).forEach(c => {
+        const id = c.factory.groupId, group = factoryGroups.get(id) || [];
+        group.push(c); factoryGroups.set(id, group);
+    });
+    const factoryGroupInfoById = new Map<string, any>();
+    for (const [id, group] of factoryGroups) { const info = factoryGroupInfo(group); if (info) factoryGroupInfoById.set(id, info); }
     const annotations = components.filter(c => c.drawn).map(c => {
         const geometryValid = validGeometry(c.geometry);
         const intentValid = c.intent === undefined || validateIntent(c.intent);
@@ -135,7 +212,7 @@ export function selectionDocument(gdsPath: string, hash: string | undefined, com
         const recipe = info ? primitiveRecipe(c) : undefined;
         const primitiveGeometryValid = c.primitive === undefined || !!info;
         if (primitiveValid && geometryValid && !primitiveGeometryValid) addIssue('unsupported_primitive_geometry', String(c.provId), 'The component geometry cannot be described as one finite polygon ring. Exact geometry is retained; review before construction.');
-        return { id: c.provId, geometry: c.geometry, measurements: c.shape, ...factoryInfo(c),
+        return { id: c.provId, geometry: c.geometry, measurements: c.shape, ...factoryInfo(c, validFactory(c.factory) ? factoryGroupInfoById.get(c.factory.groupId) : undefined),
             ...(c.route === undefined ? {} : { route: c.route, route_convention: { geometry: 'Manhattan centerline', units: 'um', width: 'full trace width', corners: 'sharp draft bends; no bend radius or port attachment inferred', validation: 'orthogonality only; no connectivity or design-rule check' } }),
             ...((c.layer === undefined && c.primitive?.layer === undefined) ? {} : { target_layer: c.route?.layer ?? c.primitive?.layer ?? c.layer }),
             ...(info?.primitive === undefined ? {} : { primitive: info.primitive }),
@@ -168,6 +245,7 @@ export function selectionDocument(gdsPath: string, hash: string | undefined, com
             interpretation: 'Request is the current selection instruction. Annotations are proposals, not existing GDS elements. For component proposals, construction_recipe contains the current polygon and numeric layer tuple; primitive parameters are authoritative only for exact or translated geometry. historical_primitive is prior metadata, not a recipe for edited geometry. referenced_elements supply target context, not additional selected instances. Provenance and source_text are reference data. No edit has been executed.' },
         request,
         elements: selected.map(element), referenced_elements: [...referenced.values()].map(element), annotations,
+        factory_references: [...factoryGroupInfoById.entries()].map(([group_id, reference]) => ({ group_id, ...reference })),
     };
 }
 export function validateAnnotations(value: unknown): value is any[] {

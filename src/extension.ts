@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { EnvProvider } from './envProvider';
 import { GdsEditorProvider } from './gdsEditor';
 import { createMarkerExample, initializeGdsProject } from './starterProject';
+import { GdsSidebarProvider } from './gdsSidebar';
 import * as path from 'path';
 let activeProvider: GdsEditorProvider | undefined;
 
@@ -27,18 +28,17 @@ export function activate(context: vscode.ExtensionContext): void {
     const env = new EnvProvider(context);
     void env.ready().catch(error => output.appendLine('[environment] ' + String(error)));
     const provider = new GdsEditorProvider(context, env, output);
+    const sidebar = new GdsSidebarProvider();
     activeProvider = provider;
 
     context.subscriptions.push(
         provider,
+        sidebar,
         vscode.window.registerCustomEditorProvider(GdsEditorProvider.viewType, provider, {
             webviewOptions: { retainContextWhenHidden: true },
             supportsMultipleEditorsPerDocument: false,
         }),
-        vscode.window.registerTreeDataProvider<vscode.TreeItem>('gdsNavigator.start', {
-            getTreeItem: item => item,
-            getChildren: () => [],
-        }),
+        vscode.window.registerTreeDataProvider('gdsNavigator.start', sidebar),
         vscode.commands.registerCommand('gdsNavigator.initializeProject', async () => {
             const selected = await chooseProjectRoot(); if (!selected) return;
             try {

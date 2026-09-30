@@ -1,0 +1,176 @@
+schema_version: 1
+routes:
+  - id: route-optional-exploration
+    problem: Optional idea exploration or a coarse full-pipeline run to discover issues without strict main-delivery checking.
+    solution: Use using-triz/references/exploratory-branches.md and tree explore; follow issues in exploratory children, relax delivery fidelity, retain reference findings, and continue actionable authorized steps until the question is answered or an evidenced bottleneck prevents useful progress. Agent-chosen budgets trigger reassessment, not automatic termination. Promote useful fixes into normal delivery branches for acceptance.
+    skill: research-fast
+    source: repo
+    notes: Optional branches do not block delivery or count toward persistence; explicit resource limits and Julia default remain.
+  - id: route-skill-matrix-development
+    problem: 在 research-triz 技能源仓库根目录明确改进技能/矩阵，或完成普通科研后需要用新证据反馈任务路由矩阵和其他适用矩阵。
+    solution: 明确开发任务以 matrix_development 为主路线，按 using-triz/references/develop-mode.md 冻结覆盖问题与预算并选择原文审查或有界复现；普通根目录科研保持其科学主路线，在结果记录后、会话收尾前用已有来源和结果做短预算矩阵反馈。必查任务路由矩阵，仅查实际适用的其他矩阵；证据已覆盖则记录 no change，确认的缺口才最小更新活路由/技能矩阵，受保护科学目录仅形成未批准提案。
+    skill: research-router
+    source: repo
+    notes: 必须位于技能源码根目录；普通科研只追加有界反馈而不改变主目标，安装副本与非科研根目录任务不触发；不能把搜索命中、代码通过或 Backlog Done 当成科学验收。
+  - id: route-research-task-methodology
+    problem: 研究任务开始时需要按目标类型选择逐步方法，或某一步出现具体障碍，需要据问题证据精确重路由。
+    solution: 框架先行：先看 research-router/references/research-task-routing-matrix.yaml 的任务类型 ID 与 choose_when，再读选中的完整行；科研任务再按 discipline-matrix.yaml 从控制机理与观测量选主学科，只在交叉接口影响决策时加入第二学科，读取其知识矩阵中的相关元素。学科知识不替代任务步骤和科学证据门。只有触发事实会改变下一步或证据门时才读取其他矩阵元素。重大歧义或用户要求独立选择时，用只读 route-scout 子代理返回简短路线卡，主控核对 ID、近邻排除和声明门；清楚任务直接路由。按当前交付决定主任务类型、首个判别器、目标成功门和停止条件，写入 route v0 后再实施；复杂目标只建必要子问题。仅当障碍阻挡目标门时保留 v0 并按 issue_refinement 建有界分支，结果返回父框架；目标门通过后报告并停止。
+    skill: research-router
+    source: repo
+    notes: 主任务类型、学科及其交叉接口、工件类别、声明强度是不同轴；跨学科路线须指出实际连接量或方法映射，不能由共享词汇触发；问题分支不得静默改写父目标，执行修复不等于科学验收。
+  - id: route-concept-framing
+    problem: 新研究概念首次讨论或目标被实质重构，用户含义、远景目标、系统边界、观测量或交付结果尚未明确。
+    solution: 先用 concept-matrix 从用户原话和已有记录填格，分批追问关键未知或矛盾格；回述系统/有益功能与有害效果、真实矛盾及 IFR，并给用户纠正核心理解的机会。将概念摘要交给 Backlog 原生任务及后续 research-fast 或 deliverable-contract，避免重复问已知信息。
+    skill: concept-matrix
+    source: repo
+    notes: 只对新概念或实质 pivot 触发；清楚的续作和单一事实问答不重新访谈。私人探索允许 unknown 与短 brief；正式验收另走契约和科学门。
+  - id: route-backlog-project-control
+    problem: 初始化 TRIZ 项目，或需要安排研究目标、尝试、依赖、计划、评论及完成记录。
+    solution: TRIZ init 同时执行原生 backlog init；先读安装版 instructions overview 和对应生命周期指南。启动原生任务时先在 plan 写简明 TRIZ route v0（父目标→交付物→适用矩阵/技能路线→方法→证据门→预算/停止→分支返回条件），再实施；pivot 留存 v0 和证据化修订。Backlog CLI 管理任务与依赖，结果用 backlog output 留证据，报告图像/方程用 backlog visual 绑定报告锚点、来源和声明范围；脑图及可视化矩阵由原生 JSON 生成，不维护第二套任务状态。
+    skill: research-map
+    source: repo
+    notes: 先用 backlog bind 绑定会话和原生任务；matrix query/diagnose 用 --backlog-session 留存决策；oplog 自动填充 task_id；用 backlog finalize 校验后完成。Backlog Done 不代表科学验收；旧 exploration 与 claim graph 保留为历史或证据；CLI 指令与验证检查不是操作系统隔离。
+  - id: route-exploratory-script
+    problem: 一个有界的私人探索问题，需要最快拿到可信的小模型答案。
+    solution: brief（问题/输出/假设/最小实验/短预算）+ 合理的小模型近似 + 可用时的廉价证伪器 + 留存证据；先交付 provisional 或 informative negative，再做预算内高影响检查；新数值科学求解器必须默认 Julia 与维护中的成熟包，Python 仅在记录特性/正确性/维护性适配排名且有可比端到端性能证据时例外；MATLAB/Octave/其他数值栈仅限用户对该任务明确点名；运行前执行 computational-stack checker，缺少合适 Julia 包时记录 pending，不得静默回退。
+    skill: research-fast
+    source: repo
+    notes: 默认入口；产物分级不明时先用 research-router。
+  - id: route-literature-corpus
+    problem: 多文献调研的直接交付是可核查的来源地图或筛选书目，而不是复现某篇论文的定量结果。
+    solution: 先冻结主题、数量、既有排除集与阅读深度；保存检索式和候选集，按 DOI、预印本版本和规范化标题去重，抽样核查原始论文页面；分别报告元数据筛选数、原文核查数和复现数，关键词命中不得升级为原文已读。按 research-router/references/reference-search.md 使用 references search/rank 脚本：本地 BM25 缩小候选，Laya 单次加载逐篇筛选并缓存，Jev 仅显式选择；缺摘要、超预算与不确定项保留，不启动重复的大型队列。
+    skill: research-router
+    source: repo
+    notes: 大规模文献表的数量门只证明筛选覆盖；后续单篇结果或加速比须另走 published_reproduction 和科学证据门。
+  - id: route-published-claim-reproduction
+    problem: 从论文摘要出发复现定量声明，必须在首个廉价计算前确定文献版本、样本、输入与比较量的证据来源及可支持的声明强度。
+    solution: 用 research-fast 冻结可证伪首门和输入/比较量谱系，再按 scientific-tdd 的 Deliver Gates Matrix 选择证据强度；同一论文汇总数值的自洽通过只报 internal consistency，独立重建曲线或计算须另设门。
+    skill: research-fast
+    source: repo
+    notes: 对已有清楚任务不重启概念访谈；保留失败与版本差异，原始数据不可得时交付有界 provisional 或 negative 并留 revisit trigger。
+  - id: route-exploratory-research-map
+    problem: 探索型研究跨越多个会话、假设、方法或分支，需要保持目标、历史、证据与用户反馈的整体视图。
+    solution: 新 Backlog 项目以原生父任务、子任务、依赖、用户评论和证据引用为唯一工作记录，由原生 JSON 生成脑图；先固定 perspective target，再反向分解问题和尝试。旧项目显式保留独立 RESEARCH_MAP.md 时沿用其历史流程；规划、pivot、结果及收尾时重读记录。
+    skill: research-map
+    source: repo
+    notes: 单次有界计算不强制建图；用户评论原文保留，代理响应另记；后台周期检查须显式自动化，不能假装 skill 会自行唤醒。
+  - id: route-artifact-classification
+    problem: 不确定一份研究工件该按什么深度验证（私有脚本/可复用模块/生产工具）。
+    solution: 先分级再选门；私人探索先交付 provisional 或 informative negative 并记录假设/限制，明确验收、发表或有后果的复用工件再记录适用的严格验收门。
+    skill: research-router
+    source: repo
+    notes: 分级结论不可静默降级。
+  - id: route-analytic-before-scan
+    problem: 即将启动多参数或高保真数值扫描，但尚未用解析结构缩小问题。
+    solution: 先做有界解析分诊：从控制方程、对称性、守恒律、无量纲群、极限/渐近、界、单调性、可辨识性、灵敏度或降维坐标中提取约束，排除不可能区域并定义针对明确假设的扫描；只有完整扫描成本（准备成本 + 点数 × 单点成本）在声明预算内确属廉价，或解析分诊无有效判别器时，才可先扫描并记录理由。
+    skill: scientific-tdd
+    source: repo
+    notes: 不强求闭式解；禁止用宽泛盲扫替代解析推理或收敛证据。
+  - id: route-scientific-claim
+    problem: 需要建立或推进一个科学声明的状态（提议→代数验证→数值收敛…）。
+    solution: 科学 TDD：独立参照、收敛证据、状态分级、留存负结果。
+    skill: scientific-tdd
+    source: repo
+    notes: 成功的进程退出不是科学验证。
+  - id: route-unresolved-gate
+    problem: 科学或软件验证门失败、超时、证据不足、signal_unresolved，或矩阵返回 no_admissible_route。
+    solution: 按 using-triz/references/delivery-recovery.md 对所有任务识别交付阻断项；每个独立缺陷创建或复用 Backlog 子任务，更深瓶颈继续嵌套，关系同步到生成 mindmap。诊断瓶颈时用 TRIZ/ARIZ 与 Laya/Jev 辅助真实文献检索、原文核查和本地判别；diagnosis 或 caveat 不是完成。保留原交付目标，分类根因、修复或选择有依据的替代路线，逐次执行有界判别器并重跑原验收门，直到交付通过或证据支持约束下不可达。仅用户所要的有界探索本身可按 provisional/negative 完成交付，不得用它降级父任务。
+    skill: scientific-tdd
+    source: repo
+    notes: 失败结论须记录原目标、未过标准、已试及排除路线、证据、不可达理由与重开条件，标 delivery-failed 并保留未过 AC；外部依赖中断是 pending，不是不可达。代理自定预算仅结束一次尝试，不能自动结束交付；日志验收仍需 resolve 或核实的终止边界。
+  - id: route-second-occurrence
+    problem: 一个研究流程第二次手动出现，即将重复劳动。
+    solution: 只有重复且有维护或复用价值时才提取为注册工作流（check/run/status），写机器可读清单；第二次出现只是候选信号。
+    skill: workflow-first
+    source: repo
+    notes: 按复用、维护、可重复性和共享价值判断，不自动因第二次出现而提取。
+  - id: route-automatic-action-ledger
+    problem: 代理可能忘记主动记录操作，导致项目变更与工具动作缺少独立于 LLM 自觉性的事实证据。
+    solution: 使用 Codex SessionStart/Stop（默认边界检查；可选 PostToolUse 逐工具审计） 同步 hooks 写入不可变自动事件文件；只保存工具输入输出哈希与 Git 工作树内容指纹，并在 Stop 时对外部变化做 reconciliation。自动事实层与语义科研日志分离，后者仍由 oplog task-step 记录解释，自动事件不得推断科学验收。
+    skill: operation-log
+    source: repo
+    notes: 项目 hooks 需用户 review/trust；WebSearch 等 hosted tools 与特殊路径可能不触发 tool hook，Stop 快照只补工作树证据，不构成完整 OS 审计或因果归属。
+  - id: route-deliverable-definition
+    problem: 一个研究项目启动、一个 Capsule 实现，或一次"做了大量验证却没抵达科学问题/不知道做完没做完"的会话，需要先固定"交付什么才算完成"。
+    solution: 明确验收、发表或有后果的复用工件与用户对话冻结最小交付契约（主观测量 + 物理 TDD 门含容差与域 + 目标状态 + 已声明限制）；私人探索先用 brief 和短预算交付 provisional/negative，再决定是否立契约；快速出首版、按根因 debug，仅不影响约定交付的细节可记为限制；交付阻断项按 delivery-recovery 持续修复并重跑原门；方法 pivot 须引用受阻槽位。
+    skill: deliverable-contract
+    source: repo
+    notes: 进程退出不等于完成；严格完成对契约判定，私人探索按 provisional/negative 边界报告；粗档数字按粗档报告。
+  - id: route-session-close
+    problem: 会话收尾，或操作日志自上次审查新增满三十条。
+    solution: oplog review 审查重复与慢操作，走矩阵比对，缺口写入 ISSUES.md。
+    skill: operation-log
+    source: repo
+    notes: 与 using-triz 的技能反馈共用 ISSUES.md。
+  - id: route-process-bottleneck
+    problem: 操作日志出现混合耗时、重复手工步骤或宿主命令启动失败，需要提高研究流程效率。
+    solution: 查 operation-log/references/process-matrix.yaml，按事实槽位选过程规则；先用 ARIZ 声明矛盾、IFR 与分离，再执行有界比较。混合耗时先补分段计时，等价重复才抽象，启动错误只修启动器；零匹配或多匹配先分解并记录缺口。
+    skill: operation-log
+    source: repo
+    notes: 只路由过程，不替代 scientific-tdd 科学验收；同一问题可同时走科学门。证据不足时标 unknown，不推断求解器耗时或整体加速。
+  - id: route-fast-match
+    problem: 需要为问题文本选出矩阵模式，并让本地零模型分类器随行学习。
+    solution: 以 agent/标签路由（matrix query）为主判定；每次路由后运行 matrix local-match --text <问题> --primary <主判定> 做交叉校验并记账；定期 matrix local-match --evaluate 看一致率，分歧样本用于调优分词与同义词表。
+    skill: operation-log
+    source: repo
+    notes: 分类器只随行不裁决；分歧记录在 logs/local-matcher/（本地）。Laya 可选本地建议按需启动、请求后退出；Jev 仅显式选择且有 key 时调用，不自动回退付费服务。建议不替代 agent/标签判定，不可用或不确定时保留手工路径。
+  - id: route-self-review
+    problem: 论文写完准备投 PRL/Nature/Science，需要按审稿人标准自审，或收到审稿意见需要解析分类。
+    solution: 查阅审稿矩阵（knowledge/reviewer_matrix.yaml），按六个维度逐条检查：有效性、重要性、广泛兴趣、新颖性、表述、可测试性。最致命组合是"技术正确但不够重要且太窄"——这是无法通过修改挽救的拒稿。
+    skill: reviewer-matrix
+    source: repo
+    notes: 六维度来自 APS 编辑政策、Nature 审稿指南、AgentReview 方法学。
+  - id: route-innovation-strategy
+    problem: 研究方向初步成型，需要判断是否具有 PRL/Nature 级突破潜力，或选择最有效的创新形式。
+    solution: 查阅创新矩阵（knowledge/innovation.yaml），将当前结果匹配到八种突破机理之一；若匹配到多种，选最强的两种组合；若都不匹配，重新审视研究方向的定位。
+    skill: innovation-matrix
+    source: repo
+    notes: 八种机理均源自 TRIZ 发明原理与 2023-2025 年 PRL/Nature 论文分析。
+  - id: route-gain-without-loss
+    problem: 需要两全——改进某特性必然恶化另一特性（精度vs速度、分辨率vs内存），或问题陈述来自他人、疑似预中毒。
+    solution: 走 ariz 技能：两短语重述与旁路问题，声明 IFR 与旋钮式矛盾，按时间/空间/部分-整体/方向/视角级联分离，STC 扰动，未解则回环探索树。
+    skill: ariz
+    source: repo
+    notes: 妥协不是解决；补偿是显式标记的未解。级联闸门均为可答测试问句。
+  - id: route-exploration-attempt
+    problem: 要开始一次新的研究尝试（变体/细化/转向/复现），或某次尝试有了结局。
+    solution: Backlog 项目用原生 task create --parent 注册尝试，task edit 记录计划、结局和证据，按原生 finalization 指南完成；旧 exploration YAML 保留为历史，未启用 Backlog 的历史项目仍可 explore add/close/tree。
+    skill: scientific-tdd
+    source: repo
+    notes: 尝试树是入库的科学记录（research/exploration.yaml），可渲染为 SVG。
+  - id: route-acceptance-standard
+    problem: 研究开始时需要为具体方法选可靠性锚点，或算出结果后不知道怎么判断对错。
+    solution: 先用 scientific-tdd 的 Deliver Gates Matrix（交付门矩阵）固定观测量、独立基准、容差/适用域与停止条件；再按问题类查验收目录（matrix explain 的 ACCEPTANCE STANDARDS 或 knowledge/acceptance.yaml），按适用强度选择检查；标准不适用或缺失时写入 ISSUES.md。
+    skill: scientific-tdd
+    source: repo
+    notes: 验收标准与交付契约基线互补；矩阵改动一律先走 ISSUES.md。
+  - id: route-new-feature
+    problem: 要新增功能或修改行为，需求与设计尚未成形。
+    solution: 先头脑风暴澄清意图与设计并获批，再进入实现。
+    skill: brainstorming
+    source: superpowers
+    notes: 仓库技能不覆盖的流程场景交给 superpowers。
+  - id: route-bug
+    problem: 遇到 bug、测试失败或非预期行为。
+    solution: 系统化调试，先定位根因再修复。
+    skill: systematic-debugging
+    source: superpowers
+    notes: ""
+  - id: route-implementation
+    problem: 设计已定，进入实现阶段。
+    solution: 测试驱动开发，红-绿-重构。
+    skill: test-driven-development
+    source: superpowers
+    notes: ""
+  - id: route-claim-done
+    problem: 即将宣布工作完成、修复生效或准备提交。
+    solution: 先跑验证命令并确认输出，再下结论。
+    skill: verification-before-completion
+    source: superpowers
+    notes: ""
+  - id: route-plain-reading
+    problem: 纯阅读、问答或查找单个事实，不改动任何东西、不建立声明。
+    solution: 不用技能，直接做。
+    skill: none
+    source: none
+    notes: 一旦要改代码或下结论，重新路由。

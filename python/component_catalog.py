@@ -15,10 +15,18 @@ import subprocess
 import sys
 import tempfile
 from typing import Any
+import contextlib
+import re
 
 MAX_CATALOG = 16_000
 MAX_JSON = 32 * 1024 * 1024
 PARSE_TIMEOUT = 20
+MAX_THUMBNAIL_NAMES = 8
+MAX_THUMBNAIL_FEATURES = 128
+MAX_THUMBNAIL_VERTICES = 4096
+PROJECT_MODULE = "gds_components"
+PROJECT_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+MAX_PROJECT_KEY = 152
 
 
 def _json_value(value: Any) -> tuple[bool, Any]:
@@ -74,11 +82,53 @@ def _description(factory: Any) -> str:
     return doc.splitlines()[0][:500] if doc else ""
 
 
-def _factories() -> dict[str, tuple[Any, str]]:
+def _load_project_factories(project_root: str | os.PathLike[str] | None) -> tuple[dict[str, tuple[Any, str, dict[str, Any]]], list[str]]:
+    if project_root is None:
+        return {}, []
+    root = Path(project_root).expanduser().resolve()
+    module_path = root / f"{PROJECT_MODULE}.py"
+    if not root.is_dir():
+        return {}, [f"project component root is not a directory: {root}"]
+    if not module_path.is_file():
+        return {}, []
+    import types
+    try:
+        sys.path.insert(0, str(root))
+        module = types.ModuleType(PROJECT_MODULE)
+        module.__file__ = str(module_path)
+        module.__package__ = ""
+        sys.modules[PROJECT_MODULE] = module
+        with contextlib.redirect_stdout(sys.stderr):
+            source = module_path.read_text(encoding="utf-8")
+            exec(compile(source, str(module_path), "exec"), module.__dict__)
+        registry = getattr(module, "COMPONENTS", None)
+        if not isinstance(registry, dict):
+            raise ValueError("COMPONENTS must be a dict[str, callable]")
+        found: dict[str, tuple[Any, str, dict[str, Any]]] = {}
+        warnings: list[str] = []
+        for key, factory in registry.items():
+            if not isinstance(key, str) or not PROJECT_KEY.fullmatch(key) or len(key) > MAX_PROJECT_KEY:
+                warnings.append(f"invalid project component key: {key!r}")
+                continue
+            if not callable(factory) or inspect.isclass(factory):
+                warnings.append(f"project component {key!r} is not a callable factory")
+                continue
+            try:
+                inspect.signature(factory)
+            except (TypeError, ValueError) as exc:
+                warnings.append(f"project component {key!r} has no inspectable signature: {exc}")
+                continue
+            found[f"project:{key}"] = (factory, "project", {"module": PROJECT_MODULE, "exportName": key})
+        return found, warnings
+    except Exception as exc:
+        return {}, [f"project component registry failed: {exc}"]
+
+
+def _factories(project_root: str | os.PathLike[str] | None = None) -> tuple[dict[str, tuple[Any, str, dict[str, Any] | None]], list[str]]:
     import gdsfactory as gf
 
     gf.gpdk.PDK.activate()
-    found: dict[str, tuple[Any, str]] = {}
+    found: dict[str, tuple[Any, str, dict[str, Any] | None]] = {}
     for name in dir(gf.components):
         if name.startswith("_"):
             continue
@@ -88,7 +138,7 @@ def _factories() -> dict[str, tuple[Any, str]]:
                 inspect.signature(factory)
             except (TypeError, ValueError):
                 continue
-            found[name] = (factory, "components")
+            found[name] = (factory, "components", None)
     for name, factory in gf.get_active_pdk().cells.items():
         if name.startswith("_") or not callable(factory):
             continue
@@ -96,30 +146,43 @@ def _factories() -> dict[str, tuple[Any, str]]:
             inspect.signature(factory)
         except (TypeError, ValueError):
             continue
-        found.setdefault(name, (factory, "pdk"))
-    return found
+        found.setdefault(name, (factory, "pdk", None))
+    project, warnings = _load_project_factories(project_root)
+    for name, entry in project.items():
+        if name in found:
+            warnings.append(f"project component name collides with built-in: {name}")
+        else:
+            found[name] = entry
+    return found, warnings
 
 
-def catalog() -> dict[str, Any]:
-    factories = _factories()
+def catalog(project_root: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+    factories, warnings = _factories(project_root)
     components = []
     for name in sorted(factories):
-        factory, source = factories[name]
-        components.append({
+        factory, source, library = factories[name]
+        item = {
             "name": name,
             "description": _description(factory),
             "parameters": _parameters(factory),
             "source": source,
-        })
+        }
+        if library is not None:
+            item["category"] = "Project components"
+            item["library"] = library
+        components.append(item)
         if len(components) >= MAX_CATALOG:
             break
     import gdsfactory as gf
-    return {"components": components, "environment": {
+    result = {"components": components, "environment": {
         "python": sys.executable,
         "gdsfactory": getattr(gf, "__version__", None),
         "path": str(Path(gf.__file__).resolve()),
         "activePdk": getattr(gf.get_active_pdk(), "name", None),
     }}
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 def _parse_gds(gds_path: str) -> dict[str, Any]:
@@ -141,7 +204,72 @@ def _parse_gds(gds_path: str) -> dict[str, Any]:
     return result
 
 
-def preview(name: str, settings: Any) -> dict[str, Any]:
+def _thumbnail_geometry(geojson: dict[str, Any]) -> None:
+    """Reject geometry too large for a chooser thumbnail rather than truncating it."""
+    features = geojson.get("features")
+    if not isinstance(features, list):
+        raise ValueError("thumbnail geometry is not a feature collection")
+    if len(features) > MAX_THUMBNAIL_FEATURES:
+        raise ValueError(f"thumbnail has too many polygons ({len(features)} > {MAX_THUMBNAIL_FEATURES})")
+    vertices = 0
+    for feature in features:
+        geometry = feature.get("geometry") if isinstance(feature, dict) else None
+        coordinates = geometry.get("coordinates") if isinstance(geometry, dict) else None
+        if geometry and geometry.get("type") != "Polygon":
+            raise ValueError("thumbnail contains unsupported geometry")
+        if not isinstance(coordinates, list):
+            raise ValueError("thumbnail contains invalid polygon geometry")
+        vertices += sum(len(ring) for ring in coordinates if isinstance(ring, list))
+    if vertices > MAX_THUMBNAIL_VERTICES:
+        raise ValueError(f"thumbnail has too many polygon points ({vertices} > {MAX_THUMBNAIL_VERTICES})")
+
+
+def _component_ports(component: Any) -> list[dict[str, Any]]:
+    ports = []
+    for port in getattr(component, "ports", ()):
+        ports.append({"name": str(port.name), "center": [float(port.center[0]), float(port.center[1])], "width": float(port.width), "orientation": float(port.orientation), "layer": list(port.layer)})
+    return ports
+
+
+def thumbnails(names: Any, project_root: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+    if not isinstance(names, list) or not names or len(names) > MAX_THUMBNAIL_NAMES:
+        raise ValueError(f"thumbnail request must contain 1-{MAX_THUMBNAIL_NAMES} names")
+    if any(not isinstance(name, str) or not name or len(name) > 160 for name in names):
+        raise ValueError("thumbnail component name is invalid")
+    factories, _ = _factories(project_root)
+    items: list[dict[str, Any]] = []
+    import gdsfactory as gf
+    # Keep the batch in one interpreter. Preview retains its isolated parser
+    # subprocess, while thumbnails use the same parser function directly to
+    # avoid starting one subprocess per icon.
+    from parse_gds import parse_gds
+    for name in names:
+        item: dict[str, Any] = {"name": name}
+        try:
+            if name not in factories:
+                raise ValueError("unknown component name")
+            # get_component applies the installed factory's normal defaults and
+            # validation; no user-provided expression or callable is evaluated.
+            factory, source, library = factories[name]
+            with contextlib.redirect_stdout(sys.stderr):
+                component = gf.get_component(factory if source == "project" else name)
+            with tempfile.TemporaryDirectory(prefix="gds-thumbnail-") as directory:
+                gds_path = str(Path(directory) / "component.gds")
+                component.write_gds(gds_path)
+                geojson = parse_gds(gds_path)
+            _thumbnail_geometry(geojson)
+            item["geojson"] = geojson
+            item["settings"] = {}
+            item["ports"] = _component_ports(component)
+            if library is not None:
+                item["library"] = library
+        except Exception as exc:
+            item["error"] = str(exc)
+        items.append(item)
+    return {"items": items}
+
+
+def preview(name: str, settings: Any, project_root: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     if not isinstance(name, str) or not name or len(name) > 160:
         raise ValueError("component name is invalid")
     if not isinstance(settings, dict):
@@ -149,10 +277,10 @@ def preview(name: str, settings: Any) -> dict[str, Any]:
     ok, _ = _json_value(settings)
     if not ok:
         raise ValueError("settings contain a value that is not JSON representable")
-    factories = _factories()
+    factories, _ = _factories(project_root)
     if name not in factories:
         raise ValueError("unknown component name")
-    factory, _ = factories[name]
+    factory, source, library = factories[name]
     parameters = {p["name"]: p for p in _parameters(factory)}
     unknown = sorted(set(settings) - set(parameters))
     if unknown:
@@ -165,24 +293,28 @@ def preview(name: str, settings: Any) -> dict[str, Any]:
     import gdsfactory as gf
     with tempfile.TemporaryDirectory(prefix="gds-component-") as directory:
         gds_path = str(Path(directory) / "component.gds")
-        component = gf.get_component(name, settings=settings)
+        with contextlib.redirect_stdout(sys.stderr):
+            component = gf.get_component(factory if source == "project" else name, settings=settings)
         component.write_gds(gds_path)
         geojson = _parse_gds(gds_path)
-    ports = []
-    for port in getattr(component, "ports", ()):
-        ports.append({"name": str(port.name), "center": [float(port.center[0]), float(port.center[1])], "width": float(port.width), "orientation": float(port.orientation), "layer": list(port.layer)})
-    return {"geojson": geojson, "name": name, "settings": settings, "ports": ports}
+    ports = _component_ports(component)
+    result = {"geojson": geojson, "name": name, "settings": settings, "ports": ports}
+    if library is not None:
+        result["library"] = library
+    return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", action="store_true")
     parser.add_argument("--preview", nargs=2, metavar=("NAME", "SETTINGS"))
+    parser.add_argument("--thumbnails", metavar="NAMES_JSON")
+    parser.add_argument("--project-root", metavar="PATH")
     args = parser.parse_args()
     try:
-        result = catalog() if args.catalog else preview(args.preview[0], json.loads(args.preview[1])) if args.preview else None
+        result = catalog(args.project_root) if args.catalog else preview(args.preview[0], json.loads(args.preview[1]), args.project_root) if args.preview else thumbnails(json.loads(args.thumbnails), args.project_root) if args.thumbnails else None
         if result is None:
-            raise ValueError("choose --catalog or --preview NAME JSON")
+            raise ValueError("choose --catalog, --preview NAME JSON, or --thumbnails NAMES_JSON")
         print(json.dumps(result, separators=(",", ":")))
         return 0
     except Exception as exc:

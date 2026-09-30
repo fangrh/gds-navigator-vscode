@@ -12,12 +12,26 @@ try {
     const { initializeGdsProject, createMarkerExample } = require(bundle);
     const root = path.join(temp, 'project'); fs.mkdirSync(root);
     const initialized = initializeGdsProject(root);
-    assert.equal(initialized.created.length, 4);
+    assert.equal(initialized.created.length, 5);
     for (const folder of ['scripts', 'layouts', 'images']) assert(fs.statSync(path.join(root, folder)).isDirectory());
     const guide = fs.readFileSync(initialized.guide, 'utf8');
     assert.match(guide, /Create marker template \(50 µm JJ pad\)/);
+    assert.match(guide, /gds_components.py/);
+    const library = path.join(root, 'gds_components.py');
+    const librarySource = fs.readFileSync(library, 'utf8');
+    assert.match(librarySource, /COMPONENTS =/);
     assert.deepEqual(initializeGdsProject(root).created, []);
     assert.equal(fs.readFileSync(initialized.guide, 'utf8'), guide);
+    fs.writeFileSync(library, '# user-edited library\n' + librarySource);
+    initializeGdsProject(root);
+    assert.equal(fs.readFileSync(library, 'utf8'), '# user-edited library\n' + librarySource, 'initialization overwrote a custom component library');
+    const python = process.env.GDS_TEST_PYTHON || path.join(extensionRoot, '.venv-fork', 'Scripts', 'python.exe');
+    assert(fs.existsSync(python), 'fork Python required to validate starter geometry');
+    const preview = JSON.parse(require('child_process').execFileSync(python, [path.join(extensionRoot, 'python/component_catalog.py'), '--project-root', root, '--preview', 'project:electrical_strip', '{"length":30,"layer":[2,0]}'], { encoding: 'utf8', timeout: 60000 }));
+    assert(preview.geojson.features.length > 0);
+    assert.equal(preview.ports.length, 2);
+    assert.equal(preview.ports[1].center[0], 30);
+    assert.deepEqual(preview.ports[1].layer, [2, 0]);
 
     const example = createMarkerExample(root, extensionRoot);
     assert.equal(example.created, true);

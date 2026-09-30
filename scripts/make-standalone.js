@@ -13,6 +13,7 @@ html = html.replace('__OL_JS__', '<script src="/media/ol.js"></script>');
 html = html.replace('__MARKER_JS__', '<script src="/webview/numbered-marker-alignment.js"></script>');
 html = html.replace('__OVERLAY_JS__', '<script src="/webview/microscope-overlay.js"></script>');
 html = html.replace('__PRIMITIVE_JS__', '<script src="/webview/layout-primitives.js"></script>');
+html = html.replace('__PORT_JS__', '<script src="/webview/port-overlay.js"></script>');
 
 html = html.replace('__CHOOSER_JS__', '<script src="/webview/component-chooser.js"></script>');
 
