@@ -145,7 +145,7 @@ __EDA_CSS__
                 <button class="zoom-btn" id="zoom-out-btn" title="Zoom out">
                     <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 </button>
-                <button class="zoom-btn" id="fit-btn" title="Fit view">
+                <button class="zoom-btn" id="fit-btn" title="Fit view (F2)">
                     <svg viewBox="0 0 24 24"><path d="M4 4h4M4 4v4M20 4h-4M20 4v4M4 20h4M4 20v-4M20 20h-4M20 20v-4"/></svg>
                 </button>
                 <button class="zoom-btn" id="copy-btn" title="Copy selection as YAML (Ctrl+Shift+C)">
@@ -468,6 +468,13 @@ document.addEventListener('keydown', function(e) {
     }
     if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
     if(e.target && ((typeof e.target.matches === 'function' && e.target.matches('input,select,textarea')) || e.target.isContentEditable))return;
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !/BUTTON/.test(e.target.tagName)) {
+        if (e.key === 'F2') { e.preventDefault(); if(e.shiftKey)contextMenuFitSelection();else fitView(); return; }
+        if (!e.shiftKey && e.key.toLowerCase() === 'e') {
+            if(typeof imageCanvasSelected!=='undefined'&&imageCanvasSelected){e.preventDefault();showSelectedImageProperties();return;}
+            if(selectedShape()){e.preventDefault();showShapeProperties();return;}
+        }
+    }
     if (e.key === 'Control' || e.key === 'Meta') ctrlPressed = true;
     // Ctrl+Shift+C copies the current selection as AI-ready YAML
     if ((e.key === 'C' || e.key === 'c') && (e.ctrlKey || e.metaKey) && e.shiftKey) {

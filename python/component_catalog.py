@@ -29,6 +29,52 @@ PROJECT_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 MAX_PROJECT_KEY = 152
 
 
+@contextlib.contextmanager
+def _factory_working_directory(source: str, project_root: str | os.PathLike[str] | None):
+    """Keep project factory paths on one drive while gdsfactory builds cells.
+
+    gdsfactory derives diagnostic/cell paths from the current directory. A
+    workspace on another Windows drive otherwise raises when it compares the
+    project module path with the extension process directory.
+    """
+    if source != "project" or project_root is None:
+        yield
+        return
+    previous = os.getcwd()
+    provenance = None
+    previous_root = None
+    previous_internal = None
+    try:
+        os.chdir(Path(project_root).expanduser().resolve())
+        # Upstream gdsfactory has no provenance_inject module. The fork's
+        # optional hook is used only when its private state API is present.
+        try:
+            import gdsfactory.provenance_inject as provenance_module
+        except ModuleNotFoundError as exc:
+            if exc.name != "gdsfactory.provenance_inject":
+                raise
+        else:
+            expected = ("_PROJECT_ROOT", "_is_internal")
+            if all(hasattr(provenance_module, name) for name in expected):
+                # Ignore this bridge frame so a project on another Windows
+                # drive can retain project-file provenance.
+                provenance = provenance_module
+                previous_root = provenance._PROJECT_ROOT
+                previous_internal = provenance._is_internal
+                bridge_file = os.path.normcase(os.path.abspath(__file__))
+                provenance._PROJECT_ROOT = str(Path(project_root).expanduser().resolve())
+                provenance._is_internal = lambda filepath: (
+                    previous_internal(filepath)
+                    or (filepath and os.path.normcase(os.path.abspath(filepath)) == bridge_file)
+                )
+        yield
+    finally:
+        if provenance is not None:
+            provenance._PROJECT_ROOT = previous_root
+            provenance._is_internal = previous_internal
+        os.chdir(previous)
+
+
 def _json_value(value: Any) -> tuple[bool, Any]:
     if value is None or isinstance(value, (str, bool, int)):
         return True, value
@@ -251,12 +297,13 @@ def thumbnails(names: Any, project_root: str | os.PathLike[str] | None = None) -
             # get_component applies the installed factory's normal defaults and
             # validation; no user-provided expression or callable is evaluated.
             factory, source, library = factories[name]
-            with contextlib.redirect_stdout(sys.stderr):
-                component = gf.get_component(factory if source == "project" else name)
-            with tempfile.TemporaryDirectory(prefix="gds-thumbnail-") as directory:
-                gds_path = str(Path(directory) / "component.gds")
-                component.write_gds(gds_path)
-                geojson = parse_gds(gds_path)
+            with _factory_working_directory(source, project_root):
+                with contextlib.redirect_stdout(sys.stderr):
+                    component = gf.get_component(factory if source == "project" else name)
+                with tempfile.TemporaryDirectory(prefix="gds-thumbnail-") as directory:
+                    gds_path = str(Path(directory) / "component.gds")
+                    component.write_gds(gds_path)
+                    geojson = parse_gds(gds_path)
             _thumbnail_geometry(geojson)
             item["geojson"] = geojson
             item["settings"] = {}
@@ -291,12 +338,13 @@ def preview(name: str, settings: Any, project_root: str | os.PathLike[str] | Non
         if isinstance(value, (dict, list)) and parameters[key].get("type", "").lower().find("callable") >= 0:
             raise ValueError(f"setting {key} is not JSON representable")
     import gdsfactory as gf
-    with tempfile.TemporaryDirectory(prefix="gds-component-") as directory:
-        gds_path = str(Path(directory) / "component.gds")
-        with contextlib.redirect_stdout(sys.stderr):
-            component = gf.get_component(factory if source == "project" else name, settings=settings)
-        component.write_gds(gds_path)
-        geojson = _parse_gds(gds_path)
+    with _factory_working_directory(source, project_root):
+        with tempfile.TemporaryDirectory(prefix="gds-component-") as directory:
+            gds_path = str(Path(directory) / "component.gds")
+            with contextlib.redirect_stdout(sys.stderr):
+                component = gf.get_component(factory if source == "project" else name, settings=settings)
+            component.write_gds(gds_path)
+            geojson = _parse_gds(gds_path)
     ports = _component_ports(component)
     result = {"geojson": geojson, "name": name, "settings": settings, "ports": ports}
     if library is not None:

@@ -42,6 +42,10 @@ async function main() {
   const watcherDelete = new EventEmitter();
   const watcher = { onDidCreate: (listener) => watcherCreate.event(listener), onDidDelete: (listener) => watcherDelete.event(listener), dispose() { this.disposed = true; } };
   const changed = new EventEmitter();
+  let findFilesCalls = 0;
+  let deferNextFindFiles = false;
+  let releaseDeferredFindFiles;
+  let rejectNextFindFiles = false;
   const vscode = {
     EventEmitter,
     TreeItem: class TreeItem { constructor(label, collapsibleState) { this.label = label; this.collapsibleState = collapsibleState; } },
@@ -53,7 +57,19 @@ async function main() {
     workspace: {
       workspaceFolders: [{ uri: uri(temp) }],
       createFileSystemWatcher: () => watcher,
-      findFiles: async (_include, _exclude, maxResults) => allFiles(temp).filter((file) => file.toLowerCase().endsWith('.gds')).slice(0, maxResults).map(uri),
+      findFiles: async (_include, _exclude, maxResults) => {
+        findFilesCalls += 1;
+        if (rejectNextFindFiles) {
+          rejectNextFindFiles = false;
+          throw new Error('synthetic findFiles failure');
+        }
+        const result = allFiles(temp).filter((file) => file.toLowerCase().endsWith('.gds')).slice(0, maxResults).map(uri);
+        if (deferNextFindFiles) {
+          deferNextFindFiles = false;
+          return new Promise((resolve) => { releaseDeferredFindFiles = () => resolve(result); });
+        }
+        return result;
+      },
       asRelativePath: (value) => path.relative(temp, value.fsPath),
       onDidChangeWorkspaceFolders: (listener) => changed.event(listener),
       fs: { readDirectory: async (folder) => fs.readdirSync(folder.fsPath, { withFileTypes: true }).map((entry) => [entry.name, entry.isDirectory() ? 2 : 1]) },
@@ -76,6 +92,10 @@ async function main() {
     const files = await provider.getChildren(filesRoot);
     assert(files.length <= 501, 'file listing must remain bounded and may include one truncation row');
     assert(files.some(item => String(item.label).includes('Showing first 500')), 'truncated projects should be disclosed');
+    assert.equal(findFilesCalls, 1, 'initial file query should scan the workspace once');
+    const repeatedFiles = await provider.getChildren(filesRoot);
+    assert.strictEqual(repeatedFiles, files, 'repeated file queries should reuse the cached tree nodes');
+    assert.equal(findFilesCalls, 1, 'repeated file queries should not rescan the workspace');
     const nested = files.find((item) => /nested\.gds$/i.test(String(item.label)));
     assert(nested && /cells/i.test(String(nested.description)), 'file nodes should preserve folder context');
 
@@ -90,13 +110,31 @@ async function main() {
     const subscription = provider.onDidChangeTreeData?.(() => { refreshes += 1; });
     watcherCreate.fire(uri(path.join(temp, 'top.gds')));
     assert(refreshes > 0, 'GDS watcher changes should refresh the tree');
+    const refreshedFiles = await provider.getChildren(filesRoot);
+    assert.notStrictEqual(refreshedFiles, files, 'watcher refresh should invalidate cached file nodes');
+    assert.equal(findFilesCalls, 2, 'watcher refresh should trigger one new workspace scan');
+
+    deferNextFindFiles = true;
+    provider.refresh();
+    const staleScan = provider.getChildren(filesRoot);
+    provider.refresh();
+    releaseDeferredFindFiles();
+    await staleScan;
+    await provider.getChildren(filesRoot);
+    assert.equal(findFilesCalls, 4, 'a stale in-flight scan must not repopulate the post-refresh cache');
+
+    provider.refresh();
+    rejectNextFindFiles = true;
+    await assert.rejects(() => provider.getChildren(filesRoot), /synthetic findFiles failure/);
+    await provider.getChildren(filesRoot);
+    assert.equal(findFilesCalls, 6, 'a rejected scan must be cleared so the next query can retry');
     subscription?.dispose();
 
     const hasSetupAction = roots.some((item) => /setup|initialize/i.test(String(item.label)) || /setup|initialize/i.test(String(item.command?.command || '')));
     assert(hasSetupAction, 'sidebar should expose a setup or initialize action');
     provider.dispose();
     assert.equal(watcher.disposed, true, 'dispose should release the file watcher');
-    console.log(JSON.stringify({ status: 'passed', bounded: true, folderContext: true, customEditorCommand: true, watcherRefresh: true, setupAction: true }));
+    console.log(JSON.stringify({ status: 'passed', bounded: true, cachedQueries: true, folderContext: true, customEditorCommand: true, watcherRefresh: true, setupAction: true }));
   } finally {
     Module._load = originalLoad;
     fs.rmSync(temp, { recursive: true, force: true });

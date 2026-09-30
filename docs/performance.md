@@ -15,6 +15,8 @@ not a universal frame-rate or end-to-end latency improvement.
 | Annotation saves | Compare annotations by indexed IDs. A 3,000-item fixture replaces roughly 9 million ID comparisons with 12,000 input visits. Deleting 100 drawings sends one complete save rather than 100 intermediate saves. |
 | Work-order rebuilds | Index provenance and geometry keys within each reconciliation when needed, preserving ambiguity and conflicting-source rejection. |
 | Frozen work-order targets | Index frozen IDs and drawn annotations once per reconciliation. A 100-target, 1,000-feature mixed relink fixture performs 1,300 ID lookups while retaining match order and ambiguity checks. |
+| Sidebar discovery | Repeated and concurrent tree queries share one bounded file scan until a watcher/workspace refresh. Generation checks prevent stale pending scans from repopulating the cache; a failed scan can be retried. Relative paths are computed once per discovered file. |
+| Pointer coordinates | A 201-event burst writes the coordinate label once per frame with the latest point. Identical displayed values skip the DOM write; mouse leave clears the label even during a pending update. Browser fixture: test/reliability/eda-workbench.test.js. |
 
 Properties continue to preserve exact numeric and mouse transforms. Their
 inspector updates occur at edit completion; geometry updates required for live

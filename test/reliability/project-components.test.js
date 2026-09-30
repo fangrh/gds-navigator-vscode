@@ -49,6 +49,7 @@ try {
     fs.rmSync(brokenRoot, { recursive: true, force: true });
 
     const preview = call(['--preview', 'project:demo', JSON.stringify({ length: 12, width: 2 }), '--project-root', projectRoot]);
+    assert(!preview.error, `custom preview failed: ${preview.error}`);
     assert.equal(preview.library.exportName, 'demo');
     assert(preview.geojson.features.length > 0 && preview.ports.length >= 2, 'custom preview geometry or ports missing');
     assert.equal(preview.geojson.bbox[2] - preview.geojson.bbox[0], 14, 'custom setting did not change geometry');

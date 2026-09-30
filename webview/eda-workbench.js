@@ -33,7 +33,7 @@
             nodes.forEach(node=>content.append(node));
         }
         nav.append(button('eda-layers-toggle','Layers','Show or hide layer panel',()=>{if(window.innerWidth<=760&&!collapsed){collapsed=true;layersCollapsed=false;}else layersCollapsed=!layersCollapsed;render();}),button('eda-dock-toggle','Inspector','Show or hide inspector',()=>{collapsed=!collapsed;render();}),button('eda-reset','Reset UI','Restore default panel arrangement',()=>{layersCollapsed=false;collapsed=window.innerWidth<950;active='images';render();}));
-        const status=create('footer','eda-status');status.append(create('span','eda-coordinates','X —   Y — µm'),create('span','eda-selection','0 selected'),create('span',null,'Tab · properties   Ctrl+Shift+C · copy'));
+        const status=create('footer','eda-status');status.append(create('span','eda-coordinates','X —   Y — µm'),create('span','eda-selection','0 selected'),create('span',null,'F2 · fit   Shift+F2 · selection   E / Tab · properties   Esc · cancel'));
         $('map-container').append(status);shell.append($('sidebar'),$('map-container'),dock);body.prepend(header,shell);body.classList.add('eda-workbench');
         $('draw-toolbar').setAttribute('role','toolbar');$('draw-toolbar').setAttribute('aria-label','Drawing and image tools');
         doc.querySelectorAll('.tool-btn,.zoom-btn').forEach(el=>{if(!el.hasAttribute('aria-label'))el.setAttribute('aria-label',el.title);});
@@ -48,7 +48,7 @@
                 nodes.forEach(node=>node.dataset.edaActive=String(name===active));
             }
             empty.hidden=panels[active].some(available);
-            empty.textContent={images:'Insert a microscope image from the right toolbar. Images are drawn below GDS elements.',properties:'Select one element, then press Tab to inspect its geometry or edit a drawn proposal.',components:'Open the shape chooser from the right toolbar to search components.',changes:'Open Work orders from the right toolbar to review this GDS queue.'}[active];
+            empty.textContent={images:'Insert a microscope image from the right toolbar. Images are drawn below GDS elements.',properties:'Select one element, then press E or Tab to inspect its geometry or edit a drawn proposal.',components:'Open the shape chooser from the right toolbar to search components.',changes:'Open Work orders from the right toolbar to review this GDS queue.'}[active];
             save();requestAnimationFrame(()=>config.resize?.());
         }
         function activate(name){if(!Object.hasOwn(labels,name))return;active=name;collapsed=false;render();}
@@ -62,7 +62,18 @@
         ['img-insert-btn','img-move-btn','img-align-btn'].forEach(id=>$(id).addEventListener('click',()=>activate('images')));
         const resizeObserver=new ResizeObserver(()=>config.resize?.());resizeObserver.observe($('map'));
         render();
-        return {activate,isActive:name=>!collapsed&&active===name,document:(file)=>{identity.textContent=String(file||'GDS Navigator').split(/[\\/]/).pop();identity.title=String(file||'GDS Navigator');},selection:(count)=>{$('eda-selection').textContent=count+' selected';},coordinates:(point)=>{$('eda-coordinates').textContent=point?'X '+point[0].toFixed(3)+'   Y '+point[1].toFixed(3)+' µm':'X —   Y — µm';},dispose:()=>{observer.disconnect();resizeObserver.disconnect();}};
+        let coordinateFrame=null,latestPoint=null,disposed=false;
+        function coordinates(point){
+            if(disposed)return;
+            latestPoint=point?point.slice():null;
+            if(coordinateFrame!==null)return;
+            coordinateFrame=requestAnimationFrame(()=>{
+                coordinateFrame=null;
+                const text=latestPoint?'X '+latestPoint[0].toFixed(3)+'   Y '+latestPoint[1].toFixed(3)+' µm':'X —   Y — µm';
+                const label=$('eda-coordinates');if(label.textContent!==text)label.textContent=text;
+            });
+        }
+        return {activate,isActive:name=>!collapsed&&active===name,document:(file)=>{identity.textContent=String(file||'GDS Navigator').split(/[\\/]/).pop();identity.title=String(file||'GDS Navigator');},selection:(count)=>{$('eda-selection').textContent=count+' selected';},coordinates,dispose:()=>{disposed=true;if(coordinateFrame!==null)cancelAnimationFrame(coordinateFrame);observer.disconnect();resizeObserver.disconnect();}};
     }
     root.EdaWorkbench={mount};
 })(window);

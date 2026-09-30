@@ -41,6 +41,33 @@ async function main() {
     await page.goto(`http://127.0.0.1:${port}/webview/test-standalone.html?data=/tiny`, { waitUntil: 'networkidle0' });
     await page.waitForFunction(() => Array.isArray(allFeatures) && allFeatures.length === 3);
     await page.waitForSelector('#eda-header');
+    // Exercise the actual key handler, including focused fields and modifiers.
+    const navigation = await page.evaluate(() => {
+      const oldFit=fitView,oldSelection=contextMenuFitSelection,oldProperties=showShapeProperties;
+      let fit=0,selection=0,properties=0;
+      fitView=()=>fit++;contextMenuFitSelection=()=>selection++;showShapeProperties=()=>properties++;
+      const key=(target,k,options={})=>target.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true,...options}));
+      addToSelection([allFeatures[0]]);
+      key(document.body,'F2');key(document.body,'F2',{shiftKey:true});key(document.body,'e');
+      const input=document.querySelector('#intent-text');key(input,'F2');key(input,'e');
+      key(document.body,'e',{ctrlKey:true});key(document.body,'F2',{altKey:true});
+      const editable=document.createElement('div');editable.contentEditable='true';document.body.append(editable);key(editable,'e');editable.remove();
+      fitView=oldFit;contextMenuFitSelection=oldSelection;showShapeProperties=oldProperties;clearSelection();
+      return {fit,selection,properties};
+    });
+    assert.deepEqual(navigation,{fit:1,selection:1,properties:1});
+    const coordinates = await page.evaluate(async () => {
+      const label=document.querySelector('#eda-coordinates');let writes=0;
+      const observer=new MutationObserver(records=>writes+=records.length);observer.observe(label,{childList:true});
+      for(let i=0;i<201;i++)edaWorkbench.coordinates([i,-i]);
+      await new Promise(requestAnimationFrame);await Promise.resolve();
+      const burstWrites=writes,final=label.textContent;
+      edaWorkbench.coordinates([200,-200]);await new Promise(requestAnimationFrame);await Promise.resolve();
+      const repeatWrites=writes;
+      edaWorkbench.coordinates([1,2]);edaWorkbench.coordinates(null);await new Promise(requestAnimationFrame);await Promise.resolve();
+      observer.disconnect();return {burstWrites,repeatWrites,final,leave:label.textContent};
+    });
+    assert.deepEqual(coordinates,{burstWrites:1,repeatWrites:1,final:'X 200.000   Y -200.000 µm',leave:'X —   Y — µm'});
     const shell = await page.evaluate(() => {
       const rect = id => { const r = document.querySelector(id).getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width, height:r.height }; };
       return { header: rect('#eda-header'), body: rect('#eda-body'), dock: rect('#eda-dock'), map: rect('#map'), tabs: !!document.querySelector('#eda-tabs'), shapeInToolbar: document.querySelector('#draw-toolbar #shape-menu-btn') !== null, shapeInHeader: document.querySelector('#eda-header #shape-menu-btn') !== null, imageHidden: document.querySelector('#image-controls').hidden };

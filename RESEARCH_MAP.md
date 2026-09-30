@@ -51,6 +51,10 @@ markmap:
   - Result: Component suite, TypeScript, reliability stages, real GDS placement and work\-order recipe passed\. Clean VSIX installed; five installed source/build hashes matc…
   - [TASK\-16\.1: Repair custom component validation gates](<backlog/tasks/task-16.1%20-%20Repair-custom-component-validation-gates.md>) · Done
     - Result: TypeScript, chooser, executable recipe, custom real\-GDS browser and port click/hide/reload gates passed\. Local Chromium used after installed Edge launcher exit…
+- [TASK\-17: Review EDA interaction usability and sidebar performance](<backlog/tasks/task-17%20-%20Review-EDA-interaction-usability-and-sidebar-performance.md>) · Done
+  - Result: UI, performance, reliability, components, alignment and work\-order checks passed; optional provenance context compatibility passed\. Production build and TypeSc…
+  - [TASK\-17\.1: Repair existing concept regression gates](<backlog/tasks/task-17.1%20-%20Repair-existing-concept-regression-gates.md>) · Done
+    - Result: project\-components\.test\.js passes custom geometry, ports, library metadata and API checks after scoped provenance/CWD handling\.
 
 ## Navigation
 

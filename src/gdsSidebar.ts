@@ -10,6 +10,9 @@ export class GdsSidebarProvider implements vscode.TreeDataProvider<SidebarItem>,
     private readonly changed = new vscode.EventEmitter<SidebarItem | undefined>();
     readonly onDidChangeTreeData = this.changed.event;
     private readonly subscriptions: vscode.Disposable[] = [];
+    private fileItems?: SidebarItem[];
+    private fileGeneration = 0;
+    private fileLoad?: { generation: number; promise: Promise<SidebarItem[]> };
 
     constructor() {
         const watcher = vscode.workspace.createFileSystemWatcher('**/*.{gds,GDS}');
@@ -17,7 +20,15 @@ export class GdsSidebarProvider implements vscode.TreeDataProvider<SidebarItem>,
             vscode.workspace.onDidChangeWorkspaceFolders(() => this.refresh()));
     }
 
-    refresh(): void { this.changed.fire(undefined); }
+    refresh(): void {
+        // File discovery is the only expensive tree operation. Invalidate it
+        // only when a watcher/workspace event says the directory contents may
+        // have changed; repeated TreeView queries can then reuse the nodes.
+        this.fileGeneration += 1;
+        this.fileItems = undefined;
+        this.fileLoad = undefined;
+        this.changed.fire(undefined);
+    }
     dispose(): void { this.subscriptions.forEach(item => item.dispose()); this.changed.dispose(); }
     getTreeItem(item: SidebarItem): vscode.TreeItem { return item; }
 
@@ -39,10 +50,24 @@ export class GdsSidebarProvider implements vscode.TreeDataProvider<SidebarItem>,
             return [...nodes, files];
         }
         if (item.kind !== 'files') return [];
+        if (this.fileItems) return this.fileItems;
+        const generation = this.fileGeneration;
+        if (this.fileLoad?.generation === generation) return this.fileLoad.promise;
+        const promise = this.loadFileItems(generation);
+        this.fileLoad = { generation, promise };
+        const clearCurrentLoad = () => {
+            if (this.fileLoad?.promise === promise) this.fileLoad = undefined;
+        };
+        promise.then(clearCurrentLoad, clearCurrentLoad);
+        return promise;
+    }
+
+    private async loadFileItems(generation: number): Promise<SidebarItem[]> {
         const uris = await vscode.workspace.findFiles('**/*.{gds,GDS}', '**/{node_modules,.git,.venv,venv}/**', FILE_LIMIT + 1);
-        const sorted = uris.slice(0, FILE_LIMIT).sort((a, b) => vscode.workspace.asRelativePath(a).localeCompare(vscode.workspace.asRelativePath(b)));
-        const nodes = sorted.map(uri => {
-            const relative = vscode.workspace.asRelativePath(uri);
+        const sorted = uris.slice(0, FILE_LIMIT)
+            .map(uri => ({ uri, relative: vscode.workspace.asRelativePath(uri) }))
+            .sort((a, b) => a.relative.localeCompare(b.relative));
+        const nodes = sorted.map(({ uri, relative }) => {
             const node = new vscode.TreeItem(path.basename(uri.fsPath), vscode.TreeItemCollapsibleState.None) as SidebarItem;
             node.kind = 'file';
             node.resourceUri = uri;
@@ -60,6 +85,9 @@ export class GdsSidebarProvider implements vscode.TreeDataProvider<SidebarItem>,
             const empty = new vscode.TreeItem('No GDS files in this workspace', vscode.TreeItemCollapsibleState.None) as SidebarItem;
             nodes.push(empty);
         }
+        // A refresh may have happened while findFiles was pending. Such a
+        // result is still valid for its caller, but must not become the cache.
+        if (generation === this.fileGeneration) this.fileItems = nodes;
         return nodes;
     }
 }

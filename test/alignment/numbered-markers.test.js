@@ -27,7 +27,7 @@ async function main(){
     try {
         const page=await browser.newPage();await page.addScriptTag({path:path.join(ROOT,'webview/numbered-marker-alignment.js')});
         async function synthetic(spec){return page.evaluate(async({samples,features,spec})=>{
-            const c=document.createElement('canvas');c.width=720;c.height=720;const ctx=c.getContext('2d');ctx.fillStyle='#aaa';ctx.fillRect(0,0,720,720);
+            const c=document.createElement('canvas'),rasterScale=spec.rasterScale||1;c.width=720*rasterScale;c.height=720*rasterScale;const ctx=c.getContext('2d');ctx.fillStyle='#aaa';ctx.fillRect(0,0,c.width,c.height);
             for(const sample of samples){if(spec.blank||sample.group===spec.missing||spec.unreadable&&!sample.isPad)continue;
                 ctx.beginPath();sample.f.geometry.coordinates[0].forEach((p,i)=>{const h=spec.inverse,z=h[6]*p[0]+h[7]*p[1]+h[8],x=(h[0]*p[0]+h[1]*p[1]+h[2])/z,y=(h[3]*p[0]+h[4]*p[1]+h[5])/z;if(i)ctx.lineTo(x,y);else ctx.moveTo(x,y);});ctx.closePath();ctx.fillStyle='#e7ee30';ctx.fill();
             }
@@ -37,8 +37,11 @@ async function main(){
             if(spec.distractors)refs.push({type:'Feature',properties:{layer:4,data_type:0},geometry:{type:'Polygon',coordinates:[[[-300,-100],[100,-100],[100,-500],[-300,-500],[-300,-100]]]}});
             return {result:await NumberedMarkerAlignment.align({image,features:refs}),png:c.toDataURL()};
         },{samples,features,spec});}
-        for(const spec of [{name:'rotation-0',deg:0},{name:'rotation-12',deg:12},{name:'rotation-90',deg:90},{name:'rotation-180',deg:180},{name:'perspective',deg:12,perspective:true},{name:'missing-marker',deg:0,missing:3}]){
-            const h=truth(spec.deg,spec.perspective),{result:r,png}=await synthetic({...spec,inverse:inverse(h)});
+        // Double the original raster dimensions for a separate 80-pixel-pad
+        // fixture; keep the original 40-pixel case below as a negative gate.
+        for(const spec of [{name:'rotation-0',deg:0},{name:'rotation-12',deg:12},{name:'rotation-90',deg:90},{name:'rotation-180',deg:180},{name:'perspective',deg:12,perspective:true},{name:'missing-marker-80px-pad',deg:0,missing:3,rasterScale:2}]){
+            const h=truth(spec.deg,spec.perspective);if(spec.rasterScale)for(const i of [0,1,3,4,6,7])h[i]/=spec.rasterScale;
+            const {result:r,png}=await synthetic({...spec,inverse:inverse(h)});
             const entry={name:spec.name,...r};report.cases.push(entry);
             fs.writeFileSync(path.join(OUT,spec.name+'.png'),Buffer.from(png.split(',')[1],'base64'));
             assert.equal(r.status,'aligned',spec.name+': '+r.reason);
@@ -46,6 +49,12 @@ async function main(){
             entry.maxProbeErrorPx=error(r.transform,h);assert(entry.maxProbeErrorPx<2,spec.name+' transform error '+entry.maxProbeErrorPx);
             assert(r.boundaryRmsPx<=2&&r.markers.every(m=>m.boundaryRmsPx<=4));
         }
+        // At 40 pixels per pad this three-marker crop has a competing label
+        // match. Retain that failure rather than relaxing the identity guard.
+        const ambiguous=(await synthetic({inverse:inverse(truth(0)),missing:3})).result;
+        assert.equal(ambiguous.status,'failed');assert.equal(ambiguous.reason,'Numbered marker identity is ambiguous');
+        assert.equal(ambiguous.photoMarkerCount,3);assert.deepEqual(ambiguous.markers,[]);assert(ambiguous.labelMargin<.025);
+        report.cases.push({name:'missing-marker-low-resolution-ambiguous',...ambiguous});
         const a=(await synthetic({inverse:inverse(truth(0))})).result,b=(await synthetic({inverse:inverse(truth(0)),distractors:true})).result;
         assert.equal(b.status,'aligned');const delta=error(a.transform,b.transform);assert(delta<.5);report.cases.push({name:'image-and-GDS-electrode-invariance',maxDeltaPx:delta});
         for(const name of ['blank','unreadable']){const {result:r}=await synthetic({inverse:inverse(truth(0)),[name]:true});assert.equal(r.status,'failed');if(name==='unreadable')assert.equal(r.photoMarkerCount,4);report.cases.push({name,status:r.status,reason:r.reason});}

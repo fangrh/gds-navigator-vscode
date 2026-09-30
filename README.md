@@ -395,7 +395,9 @@ Use **Usage** in the viewer or **GDS: Review Usage Log** to review local control
 
 ### EDA workbench
 
-The viewer now uses a top build/view toolbar, layer sidebar, right drawing rail and docked Images / Properties / Components / Changes inspector. The instruction composer stays at the bottom. Use Layers, Inspector and Reset UI to manage space; Tab opens properties for the selected object. See [EDA layout comparison and controls](docs/eda-workbench.md).
+The viewer now uses a top build/view toolbar, layer sidebar, right drawing rail and docked Images / Properties / Components / Changes inspector. The instruction composer stays at the bottom. Use Layers, Inspector and Reset UI to manage space; **E** or **Tab** opens properties for the selected object. **F2** fits the layout and drawings; **Shift+F2** fits the selection. These shortcuts leave text fields and modified key combinations alone. See [EDA layout comparison and controls](docs/eda-workbench.md).
+
+The navigation follows familiar EDA conventions: [KLayout Zoom Fit](https://klayout.org/downloads/master/doc-qt5/manual/zoom.html) uses F2, and [KiCad properties](https://docs.kicad.org/9.0/en/pcbnew/pcbnew.html) uses E. Existing proposal editing, source navigation, component placement, ports, microscope alignment and work orders retain their semantics.
 
 ## Per-GDS work orders
 
