@@ -33,6 +33,22 @@
         return (Array.isArray(geojson?.ports) ? geojson.ports : []).filter(p => p.coordinate_frame === 'layout' && typeof p.id === 'string' && finitePort(p))
             .map(p => ({ ...p, source: 'gds', center: p.center.slice() }));
     }
+    function factoryPortGroup(groupId, group) {
+            const byIndex = new Map(group.map(feature => [feature.get('factory').pieceIndex, feature]));
+            const first = byIndex.get(0), factory = first?.get('factory');
+            if (!factory || byIndex.size !== factory.pieceCount || group.length !== factory.pieceCount) return [];
+            const pose = rigidPose(factory.sourceGeometry, { type: 'Polygon', coordinates: first.getGeometry().getCoordinates() });
+            if (!pose || !group.every(feature => geometryMatches(feature.get('factory').sourceGeometry,
+                { type: 'Polygon', coordinates: feature.getGeometry().getCoordinates() }, pose))) return [];
+            const ports = [];
+            (Array.isArray(factory.ports) ? factory.ports : []).forEach((port, index) => {
+                if (!finitePort(port)) return;
+                ports.push({ id: `factory:${groupId}:${index}`, name: port.name, center: rotate(port.center, pose.angle, pose.translation),
+                    source_center: port.center.slice(), width: port.width, orientation: ((port.orientation + pose.angle * 180 / Math.PI) % 360 + 360) % 360,
+                    layer: port.layer, coordinate_frame: 'layout', source: 'factory', factory_name: factory.name, group_id: groupId });
+            });
+            return ports;
+    }
     function factoryPorts(features) {
         const groups = new Map();
         for (const feature of features) {
@@ -43,21 +59,77 @@
             groups.set(factory.groupId, group);
         }
         const ports = [];
-        for (const [groupId, group] of groups) {
-            const byIndex = new Map(group.map(feature => [feature.get('factory').pieceIndex, feature]));
-            const first = byIndex.get(0), factory = first?.get('factory');
-            if (!factory || byIndex.size !== factory.pieceCount || group.length !== factory.pieceCount) continue;
-            const pose = rigidPose(factory.sourceGeometry, { type: 'Polygon', coordinates: first.getGeometry().getCoordinates() });
-            if (!pose || !group.every(feature => geometryMatches(feature.get('factory').sourceGeometry,
-                { type: 'Polygon', coordinates: feature.getGeometry().getCoordinates() }, pose))) continue;
-            (Array.isArray(factory.ports) ? factory.ports : []).forEach((port, index) => {
-                if (!finitePort(port)) return;
-                ports.push({ id: `factory:${groupId}:${index}`, name: port.name, center: rotate(port.center, pose.angle, pose.translation),
-                    source_center: port.center.slice(), width: port.width, orientation: ((port.orientation + pose.angle * 180 / Math.PI) % 360 + 360) % 360,
-                    layer: port.layer, coordinate_frame: 'layout', source: 'factory', factory_name: factory.name, group_id: groupId });
-            });
-        }
+        for (const [groupId, group] of groups) ports.push(...factoryPortGroup(groupId, group));
         return ports;
     }
-    root.PortOverlay = { layoutPorts, factoryPorts, rigidPose };
+    function factoryPortProjector() {
+        const groups = new Map(), featureGroups = new Map(), cache = new Map(), dirty = new Set();
+        let recomputations = 0;
+        function groupIdOf(feature) {
+            return feature?.get('factory')?.groupId || null;
+        }
+        function removeFromGroup(feature, groupId) {
+            if (!groupId) return;
+            const group = groups.get(groupId), index = group?.indexOf(feature) ?? -1;
+            if (index >= 0) group.splice(index, 1);
+            if (!group || !group.length) { groups.delete(groupId); cache.delete(groupId); }
+            dirty.add(groupId);
+        }
+        function addToGroup(feature, groupId) {
+            if (!groupId) return;
+            const group = groups.get(groupId) || [];
+            group.push(feature);
+            groups.set(groupId, group); dirty.add(groupId);
+        }
+        function add(feature) {
+            const next = groupIdOf(feature), known = featureGroups.has(feature), previous = featureGroups.get(feature);
+            if (!known) { featureGroups.set(feature, next); if (next) addToGroup(feature, next); return !!next; }
+            if (previous !== next) {
+                if (previous) removeFromGroup(feature, previous);
+                if (next) addToGroup(feature, next);
+                featureGroups.set(feature, next);
+                return true;
+            }
+            return !!next;
+        }
+        function remove(feature) {
+            if (!featureGroups.has(feature)) return false;
+            const previous = featureGroups.get(feature);
+            if (previous) removeFromGroup(feature, previous);
+            featureGroups.delete(feature);
+            return !!previous;
+        }
+        function change(feature) {
+            const known = featureGroups.has(feature), previous = featureGroups.get(feature), next = groupIdOf(feature);
+            if (!known) return add(feature);
+            if (previous !== next) {
+                if (previous) removeFromGroup(feature, previous);
+                if (next) addToGroup(feature, next);
+                featureGroups.set(feature, next);
+            } else if (next) dirty.add(next);
+            return !!(previous || next);
+        }
+        function reset(features) {
+            groups.clear(); cache.clear(); dirty.clear(); featureGroups.clear();
+            for (const feature of features || []) add(feature);
+        }
+        function ports() {
+            for (const groupId of dirty) {
+                const group = groups.get(groupId);
+                if (group?.length) { cache.set(groupId, factoryPortGroup(groupId, group)); recomputations++; }
+                else cache.delete(groupId);
+            }
+            dirty.clear();
+            const result = [], emitted = new Set();
+            for (const [feature, groupId] of featureGroups) {
+                if (!groupId || emitted.has(groupId) || !groups.has(groupId)) continue;
+                emitted.add(groupId); result.push(...(cache.get(groupId) || []));
+            }
+            for (const groupId of groups.keys()) if (!emitted.has(groupId)) result.push(...(cache.get(groupId) || []));
+            return result;
+        }
+        function stats() { return { recomputations, groups: groups.size, dirty: dirty.size }; }
+        return { add, remove, change, reset, ports, stats };
+    }
+    root.PortOverlay = { layoutPorts, factoryPorts, factoryPortProjector, rigidPose };
 })(typeof window !== 'undefined' ? window : globalThis);

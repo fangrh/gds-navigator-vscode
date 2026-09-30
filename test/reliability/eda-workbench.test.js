@@ -41,6 +41,23 @@ async function main() {
     await page.goto(`http://127.0.0.1:${port}/webview/test-standalone.html?data=/tiny`, { waitUntil: 'networkidle0' });
     await page.waitForFunction(() => Array.isArray(allFeatures) && allFeatures.length === 3);
     await page.waitForSelector('#eda-header');
+    const inspectorBurst=await page.evaluate(async()=>{
+      await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
+      const oldFrame=window.requestAnimationFrame,oldResize=map.updateSize,oldSave=vscode.setState;
+      let callbacks=[],resizes=0,saves=0;
+      window.requestAnimationFrame=callback=>{callbacks.push(callback);return 9000+callbacks.length;};
+      map.updateSize=()=>resizes++;vscode.setState=state=>{saves++;oldSave(state);};
+      try{
+        for(let i=0;i<201;i++)edaWorkbench.activate(i%2?'images':'review');
+        const scheduled=callbacks.length;callbacks.splice(0).forEach(fn=>fn());
+        const burst={scheduled,resizes,saves,active:document.querySelector('#eda-dock-content').getAttribute('aria-labelledby'),state:window.__state.workbench.active};
+        resizes=0;saves=0;
+        for(let i=0;i<201;i++)edaWorkbench.activate('review');
+        const repeated={scheduled:callbacks.length,resizes,saves};
+        return {burst,repeated};
+      }finally{window.requestAnimationFrame=oldFrame;map.updateSize=oldResize;vscode.setState=oldSave;edaWorkbench.activate('images');}
+    });
+    assert.deepEqual(inspectorBurst,{burst:{scheduled:2,resizes:1,saves:1,active:'eda-tab-review',state:'review'},repeated:{scheduled:0,resizes:0,saves:0}});
     // Exercise the actual key handler, including focused fields and modifiers.
     const navigation = await page.evaluate(() => {
       const oldFit=fitView,oldSelection=contextMenuFitSelection,oldProperties=showShapeProperties;
@@ -77,6 +94,12 @@ async function main() {
     const visiblePanels = await page.$$eval('#eda-dock-content > *', els => els.filter(el => !el.hidden && getComputedStyle(el).display !== 'none' && el.id !== 'eda-empty').map(el => el.id));
     assert.deepEqual(visiblePanels, [], 'only actual visible panels should be mounted initially');
     for (const tab of ['images', 'properties', 'components', 'changes']) { await page.click('#eda-tab-' + tab); assert.equal(await page.$eval('#eda-tab-' + tab, el => el.getAttribute('aria-selected')), 'true'); }
+    await page.click('#eda-tab-images');await page.keyboard.press('ArrowRight');
+    assert.equal(await page.evaluate(()=>document.activeElement.id),'eda-tab-properties');
+    assert.equal(await page.$eval('#eda-dock-content',el=>el.getAttribute('aria-labelledby')),'eda-tab-properties');
+    assert.equal(await page.$eval('#eda-tab-properties',el=>el.getAttribute('aria-controls')),'eda-dock-content');
+    await page.click('#eda-dock-close');assert.equal(await page.evaluate(()=>document.activeElement.id),'eda-dock-toggle');
+    await page.keyboard.press('Enter');assert(await page.$eval('#eda-dock',el=>getComputedStyle(el).display!=='none'));
     await page.click('#eda-tab-components'); await page.waitForFunction(() => !document.querySelector('#primitive-controls').hidden);
     const requestId = await page.evaluate(() => window.__sent.filter(m => m.type === 'requestComponentCatalog').at(-1).requestId);
     const longDescription = 'Tall component documentation '.repeat(160);

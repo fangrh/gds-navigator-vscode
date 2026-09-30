@@ -17,6 +17,8 @@ not a universal frame-rate or end-to-end latency improvement.
 | Frozen work-order targets | Index frozen IDs and drawn annotations once per reconciliation. A 100-target, 1,000-feature mixed relink fixture performs 1,300 ID lookups while retaining match order and ambiguity checks. |
 | Sidebar discovery | Repeated and concurrent tree queries share one bounded file scan until a watcher/workspace refresh. Generation checks prevent stale pending scans from repopulating the cache; a failed scan can be retried. Relative paths are computed once per discovered file. |
 | Pointer coordinates | A 201-event burst writes the coordinate label once per frame with the latest point. Identical displayed values skip the DOM write; mouse leave clears the label even during a pending update. Browser fixture: test/reliability/eda-workbench.test.js. |
+| Inspector activation | A 201-change burst schedules one resize and saves its final panel state once. Reopening the active panel 201 times schedules no work. Browser checks also cover tab/panel labels, arrow navigation, focus restoration and compact layouts. |
+| Component ports | Only dirty live factory groups repeat rigid-geometry verification. With two placed groups, moving one recomputes one group and retains the other group's exact port ID and center. Full-versus-cached output checks cover translation, rotation, deformation rejection, conversion, rename, reset and removal. |
 
 Properties continue to preserve exact numeric and mouse transforms. Their
 inspector updates occur at edit completion; geometry updates required for live

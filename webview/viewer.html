@@ -401,8 +401,9 @@ var portLayer = new ol.layer.Vector({
     }
 });
 var portFeatureById = new Map(), portRefreshFrame = null;
+var factoryPortProjector = PortOverlay.factoryPortProjector();
 function refreshPortOverlay() {
-    var records = layoutPortRecords.concat(PortOverlay.factoryPorts(drawSource.getFeatures()));
+    var records = layoutPortRecords.concat(factoryPortProjector.ports());
     var nextIds = new Set();
     records.forEach(function(port) {
         if (!Array.isArray(port.center) || !port.center.every(Number.isFinite) || nextIds.has(port.id)) return;
@@ -434,6 +435,10 @@ function requestPortRefresh() {
     if (portRefreshFrame !== null) return;
     portRefreshFrame = requestAnimationFrame(function() { portRefreshFrame = null; refreshPortOverlay(); });
 }
+function addPortFeature(event) { if (factoryPortProjector.add(event.feature)) requestPortRefresh(); }
+function removePortFeature(event) { if (factoryPortProjector.remove(event.feature)) requestPortRefresh(); }
+function changePortFeature(event) { if (factoryPortProjector.change(event.feature)) requestPortRefresh(); }
+function clearPortFeatures() { factoryPortProjector.reset([]); requestPortRefresh(); }
 function savePortDisplay() {
     if (vscode?.setState) vscode.setState(Object.assign({}, vscode.getState() || {}, {portsVisible, portNamesVisible}));
 }
@@ -453,9 +458,10 @@ document.getElementById('port-names-visible').onchange = function() {
     portLayer.changed();
     savePortDisplay();
 };
-drawSource.on('addfeature', requestPortRefresh);
-drawSource.on('removefeature', requestPortRefresh);
-drawSource.on('changefeature', requestPortRefresh);
+drawSource.on('addfeature', addPortFeature);
+drawSource.on('removefeature', removePortFeature);
+drawSource.on('changefeature', changePortFeature);
+drawSource.on('clear', clearPortFeatures);
 
 // ============================================================
 // Keyboard handling

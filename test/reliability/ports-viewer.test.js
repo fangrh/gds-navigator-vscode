@@ -11,6 +11,28 @@ async function main(){
   const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/webview/test-standalone.html?data=/test/fixtures/real_geojson`,{waitUntil:'networkidle0'});
   await page.waitForFunction(()=>window.__viewerReady&&allFeatures.length>0);
+  const factoryRefresh=await page.evaluate(async()=>{
+   const polygon=(dx,dy)=>[[[dx,dy],[dx+2,dy],[dx+2,dy+1],[dx,dy+1],[dx,dy]]];
+   const make=(group,dx,dy)=>{const sourceGeometry={type:'Polygon',coordinates:polygon(0,0)},feature=new ol.Feature({geometry:new ol.geom.Polygon(polygon(dx,dy))});feature.set('isDrawn',true);feature.set('factory',{groupId:group,pieceIndex:0,pieceCount:1,name:group,sourceGeometry,ports:[{name:'in',center:[1,0],width:0.5,orientation:0,layer:[1,0]}]});return feature;};
+   drawSource.clear();
+   const first=make('factory-a',5,7), second=make('factory-b',20,30);
+   drawSource.addFeatures([first,second]);
+   await new Promise(requestAnimationFrame);
+   const beforeStats=factoryPortProjector.stats(), beforeSecond=portFeatureById.get('factory:factory-b:0').getGeometry().getCoordinates().slice();
+   first.setGeometry(new ol.geom.Polygon(polygon(8,10)));
+   await new Promise(requestAnimationFrame);
+   const afterStats=factoryPortProjector.stats(), afterSecond=portFeatureById.get('factory:factory-b:0').getGeometry().getCoordinates().slice();
+   const ids=Array.from(portFeatureById.keys()).filter(id=>id.startsWith('factory:')).sort();
+   drawSource.removeFeature(second);await new Promise(requestAnimationFrame);
+   drawSource.addFeature(second);await new Promise(requestAnimationFrame);
+   const readded=portFeatureById.has('factory:factory-b:0');
+   drawSource.clear();await new Promise(requestAnimationFrame);
+   return {delta:afterStats.recomputations-beforeStats.recomputations,beforeSecond,afterSecond,ids,readded,groups:factoryPortProjector.stats().groups,factoryIds:Array.from(portFeatureById.keys()).filter(id=>id.startsWith('factory:'))};
+  });
+  assert.equal(factoryRefresh.delta,1);
+  assert.deepEqual(factoryRefresh.beforeSecond,factoryRefresh.afterSecond);
+  assert.deepEqual(factoryRefresh.ids,['factory:factory-a:0','factory:factory-b:0']);
+  assert.equal(factoryRefresh.readded,true);assert.equal(factoryRefresh.groups,0);assert.deepEqual(factoryRefresh.factoryIds,[]);
   const initial=await page.evaluate(()=>{
    const geometry=gdsGeoJsonFmt.writeGeometryObject(allFeatures[0].getGeometry());
    const center=[40,20];

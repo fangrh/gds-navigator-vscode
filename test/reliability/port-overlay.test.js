@@ -7,4 +7,48 @@ const feature={get(key){return this[key]},getGeometry(){return {getCoordinates:(
 const ports=context.PortOverlay.factoryPorts([feature]);
 assert.equal(ports.length,1);assert.deepEqual(Array.from(ports[0].center),[10,21]);assert.equal(ports[0].orientation,90);
 feature.coordinates[0][1]=[123,456];assert.equal(context.PortOverlay.factoryPorts([feature]).length,0);
-console.log(JSON.stringify({status:'passed',transformed:true,deformedGroupRejected:true}));
+function makeFeature(groupId, offset) {
+  const base={type:'Polygon',coordinates:[[[0,0],[2,0],[2,1],[0,1],[0,0]]]};
+  const coordinates=base.coordinates.map(r=>r.map(p=>[p[0]+offset[0],p[1]+offset[1]]));
+  return {get(key){return this[key]},getGeometry(){return {getCoordinates:()=>this.coordinates}},factory:{groupId,pieceIndex:0,pieceCount:1,name:groupId,sourceGeometry:base,ports:[{name:'in',center:[1,0],width:0.5,orientation:0,layer:[1,0]}]},coordinates};
+}
+const first=makeFeature('first',[5,7]); let second=makeFeature('second',[20,30]);
+const projector=context.PortOverlay.factoryPortProjector();
+assert.equal(projector.add(first),true);assert.equal(projector.add(second),true);
+assert.deepEqual(projector.ports(),context.PortOverlay.factoryPorts([first,second]));
+assert.equal(projector.stats().recomputations,2);
+assert.deepEqual(projector.ports(),context.PortOverlay.factoryPorts([first,second]));
+assert.equal(projector.stats().recomputations,2);
+first.coordinates=first.coordinates.map(r=>r.map(p=>[p[0]+3,p[1]-2]));projector.change(first);
+assert.deepEqual(projector.ports(),context.PortOverlay.factoryPorts([first,second]));
+assert.equal(projector.stats().recomputations,3);
+first.coordinates=first.factory.sourceGeometry.coordinates.map(r=>r.map(p=>[-p[1]+50,p[0]+60]));projector.change(first);
+assert.deepEqual(projector.ports(),context.PortOverlay.factoryPorts([first,second]));
+assert.equal(projector.stats().recomputations,4);
+second.coordinates[0][1]=[999,999];projector.change(second);
+assert.deepEqual(projector.ports(),context.PortOverlay.factoryPorts([first,second]));
+assert.equal(projector.stats().recomputations,5);
+assert.equal(projector.remove(second),true);assert.deepEqual(projector.ports(),context.PortOverlay.factoryPorts([first]));
+second=makeFeature('second',[20,30]);assert.equal(projector.add(second),true);
+assert.deepEqual(projector.ports(),context.PortOverlay.factoryPorts([first,second]));
+assert.equal(projector.stats().recomputations,6);
+first.factory.groupId='renamed';projector.change(first);
+assert.deepEqual(projector.ports(),context.PortOverlay.factoryPorts([first,second]));
+assert.equal(projector.stats().recomputations,7);
+const plain={get(){return undefined}};assert.equal(projector.add(plain),false);assert.equal(projector.stats().recomputations,7);
+const orderProjector=context.PortOverlay.factoryPortProjector(), olderPlain=makeFeature('converted',[1,1]), laterFactory=makeFeature('later',[10,10]);
+olderPlain.factory=undefined;assert.equal(orderProjector.add(olderPlain),false);assert.equal(orderProjector.add(laterFactory),true);
+olderPlain.factory=makeFeature('converted',[1,1]).factory;orderProjector.change(olderPlain);
+assert.deepEqual(orderProjector.ports(),context.PortOverlay.factoryPorts([olderPlain,laterFactory]));
+orderProjector.reset([olderPlain,laterFactory]);assert.deepEqual(orderProjector.ports(),context.PortOverlay.factoryPorts([olderPlain,laterFactory]));
+assert.equal(orderProjector.remove(laterFactory),true);assert.equal(orderProjector.add(laterFactory),true);
+assert.deepEqual(orderProjector.ports(),context.PortOverlay.factoryPorts([olderPlain,laterFactory]));
+const removalProjector=context.PortOverlay.factoryPortProjector(), manyPlain=Array.from({length:128},()=>({get(){return undefined}}));
+removalProjector.reset(manyPlain);
+const arrayIndexOf=Array.prototype.indexOf,arraySplice=Array.prototype.splice;let indexCalls=0,spliceCalls=0;
+Array.prototype.indexOf=function(){indexCalls++;return arrayIndexOf.apply(this,arguments);};
+Array.prototype.splice=function(){spliceCalls++;return arraySplice.apply(this,arguments);};
+try { manyPlain.forEach(feature=>assert.equal(removalProjector.remove(feature),false)); }
+finally { Array.prototype.indexOf=arrayIndexOf;Array.prototype.splice=arraySplice; }
+assert.equal(indexCalls,0);assert.equal(spliceCalls,0);assert.equal(removalProjector.stats().groups,0);
+console.log(JSON.stringify({status:'passed',transformed:true,rotated:true,deformedGroupRejected:true,cachedGroups:true,groupRecomputations:7}));

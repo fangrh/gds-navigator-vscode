@@ -156,6 +156,10 @@
     }
   },
   "scripts": {
+    "project:check": "node scripts/verify-project.cjs check",
+    "project:verify": "node scripts/verify-project.cjs run",
+    "project:status": "node scripts/verify-project.cjs status",
+    "test:project-verification": "node test/reliability/project-verification.test.js",
     "vscode:prepublish": "npm run package",
     "compile": "npm run build:webview && node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",

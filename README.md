@@ -399,6 +399,8 @@ The viewer now uses a top build/view toolbar, layer sidebar, right drawing rail 
 
 The navigation follows familiar EDA conventions: [KLayout Zoom Fit](https://klayout.org/downloads/master/doc-qt5/manual/zoom.html) uses F2, and [KiCad properties](https://docs.kicad.org/9.0/en/pcbnew/pcbnew.html) uses E. Existing proposal editing, source navigation, component placement, ports, microscope alignment and work orders retain their semantics.
 
+Development improvements are tracked in Backlog with owners, acceptance criteria and verification evidence. Run `npm run project:check -- release`, `npm run project:verify -- release`, and `npm run project:status` for repeatable release validation. See [project management and verification](docs/project-management.md).
+
 ## Per-GDS work orders
 
 Select elements, describe the change in the bottom **New work order** composer, then choose **Add work order**. The right **Work orders** inspector keeps a separate FIFO list for each GDS, with reference search, status filters and an activity journal. **Copy ref** or **Copy open orders** gives your AI agent the saved targets and CLI lookup instructions. Orders persist in `.gds-navigator/instructions.json`; completed source receipts enable checked undo. See [the work-order guide](docs/agent-instructions.md) for the agent workflow and undo limits.

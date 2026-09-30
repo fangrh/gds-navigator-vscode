@@ -1,0 +1,42 @@
+'use strict';
+const assert = require('assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { EventEmitter } = require('events');
+const v = require('../../scripts/verify-project.cjs');
+
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'gds-project-verification-'));
+const okSpawn = (file, args) => { const p = new EventEmitter(); p.stdout = new EventEmitter(); p.stderr = new EventEmitter(); process.nextTick(() => p.emit('close', 0)); return p; };
+async function main() {
+  assert.deepEqual(v.parseArgs(['run', 'quick']).profile, 'quick');
+  assert.equal(v.parseArgs(['build', 'release']).command, 'check');
+  assert.equal(v.PROFILES.quick.length, 5); assert.equal(v.PROFILES.release.at(-1)[0], 'package');
+  const calls = []; const result = await v.runStage({ name: 'stub', kind: 'node', args: ['-e', 'x'] }, { root: temp, spawn: (file, args, opts) => { calls.push({ file, args, opts }); return okSpawn(file, args); } });
+  assert.equal(result.exitCode, 0); assert.equal(calls[0].opts.shell, false); assert.deepEqual(calls[0].args, ['-e', 'x']);
+  const windowsEnv = v.normalizeEnvPath({ Path: 'C:\\Windows\\System32', PATH: 'ignored' }, ['C:\\Node', 'C:\\Python'], 'win32');
+  assert.equal(windowsEnv.Path, `C:\\Node${path.delimiter}C:\\Python${path.delimiter}C:\\Windows\\System32`); assert.equal(windowsEnv.PATH, undefined);
+  const failed = await v.runStage({ name: 'failed', kind: 'node', args: [] }, { root: temp, spawn: () => { const p = new EventEmitter(); p.stdout = new EventEmitter(); p.stderr = new EventEmitter(); process.nextTick(() => p.emit('close', 7)); return p; } });
+  assert.equal(failed.exitCode, 7);
+  let syncCalls = []; const fakeProbe = (_file, args) => { syncCalls.push(args); return { status: 0 }; };
+  const resolved = await v.resolveExecutables({ pythonExecutable: 'python-test', browserExecutable: process.execPath, spawnSync: fakeProbe, browserSmoke: async () => {} });
+  assert.deepEqual(resolved, { python: 'python-test', pythonSelection: 'explicit', browser: process.execPath }); assert.deepEqual(syncCalls, [['--version']]);
+  const envCalls = [];
+  v.PROFILES.test = [['one', 'node', ['-e', 'process.stdout.write("ok")']], ['two', 'node', ['-e', 'process.stdout.write("late")']]];
+  const all = await v.runProfile('test', { root: temp, runId: 'all-pass', pythonExecutable: 'python-test', browserExecutable: process.execPath, spawnSync: fakeProbe, browserSmoke: async () => {}, spawn: (_file, _args, opts) => { envCalls.push(opts.env); return okSpawn(_file, _args); } });
+  assert.equal(all.status, 'passed'); assert.equal(all.stages.length, 2); assert.equal(envCalls[0].GDS_BROWSER, process.execPath); assert.equal(envCalls[0].GDS_PYTHON, 'python-test');
+  const stopped = await v.runProfile('test', { root: temp, runId: 'fail-stop', pythonExecutable: 'python-test', browserExecutable: process.execPath, spawnSync: fakeProbe, browserSmoke: async () => {}, spawn: (_file, _args, opts) => { envCalls.push(opts.env); const p = new EventEmitter(); p.stdout = new EventEmitter(); p.stderr = new EventEmitter(); process.nextTick(() => p.emit('close', envCalls.length === 3 ? 4 : 0)); return p; } });
+  assert.equal(stopped.status, 'failed'); assert.equal(stopped.stages.length, 1); assert.equal(JSON.parse(fs.readFileSync(path.join(temp, 'logs/project-verification/latest.json'), 'utf8')).status, 'failed'); assert(fs.existsSync(path.join(temp, 'logs/project-verification/fail-stop/01-one.log')));
+  const invalidProfile = await v.runProfile('missing', { root: temp, runId: 'invalid-profile' });
+  assert.equal(invalidProfile.status, 'failed'); assert.match(invalidProfile.preflight.error, /Unknown profile/);
+  assert.throws(() => v.parseArgs(['run', 'quick', '--bad']), /Unknown option/);
+  assert.throws(() => v.parseArgs(['run', 'quick', '--python']), /Missing value/);
+  v.PROFILES.broken = [['broken', 'invalid', []]];
+  const thrown = await v.runProfile('broken', { root: temp, runId: 'thrown-stage', pythonExecutable: 'python-test', browserExecutable: process.execPath, spawnSync: fakeProbe, browserSmoke: async () => {} });
+  assert.equal(thrown.status, 'failed'); assert.equal(thrown.stages[0].status, 'failed'); assert(fs.existsSync(path.join(temp, 'logs/project-verification/thrown-stage/result.json')));
+  const timed = await v.runStage({ name: 'timeout', kind: 'node', args: [] }, { root: temp, timeoutMs: 5, spawn: () => { const p = new EventEmitter(); p.stdout = new EventEmitter(); p.stderr = new EventEmitter(); p.kill = () => {}; return p; } });
+  assert.equal(timed.timedOut, true);
+  fs.rmSync(temp, { recursive: true, force: true });
+  console.log(JSON.stringify({ status: 'passed', checks: ['profile-selection', 'argv-only-spawn', 'nonzero-stage', 'executable-overrides'] }));
+}
+main().catch(error => { console.error(error.stack); process.exitCode = 1; });
