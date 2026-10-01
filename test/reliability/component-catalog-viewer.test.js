@@ -28,6 +28,18 @@ async function main() {
     const thumbRequest=await page.evaluate(()=>__sent.find(m=>m.type==='requestComponentThumbnails'));
     await page.evaluate(({id,result})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentThumbnails',requestId:id,result:{items:[result,{name:'zeta',error:'width required'}]}}})),{id:thumbRequest.requestId,result:PREVIEW});
     await page.waitForSelector('#component-catalog .component-card-thumb svg path');
+    await page.waitForSelector('#component-catalog button[aria-label="Retry failed component shape thumbnails"]:not([hidden])');
+    const beforeRecovery=await page.evaluate(()=>({drawn:drawSource.getFeatures().length,selected:selectedFeatures.getLength(),alphaThumb:!!document.querySelector('.component-card-name')?.parentElement?.querySelector('.component-card-thumb svg')}));
+    assert.deepEqual(beforeRecovery,{drawn:0,selected:0,alphaThumb:true},'thumbnail recovery changed placement or selection state');
+    await page.focus('#component-catalog button[aria-label="Retry failed component shape thumbnails"]'); await page.keyboard.press('Enter');
+    await page.waitForFunction(oldId=>__sent.filter(m=>m.type==='requestComponentThumbnails').some(m=>m.requestId!==oldId),{},thumbRequest.requestId);
+    const retryRequest=await page.evaluate(()=>__sent.filter(m=>m.type==='requestComponentThumbnails').at(-1));
+    assert.notEqual(retryRequest.requestId,thumbRequest.requestId,'retry reused the failed request id'); assert.deepEqual(retryRequest.names,['zeta'],'retry did not preserve the successful alpha thumbnail');
+    await page.evaluate(({id})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentThumbnails',requestId:id,result:{items:[{name:'zeta',error:'stale failure'}]}}})),{id:thumbRequest.requestId});
+    await page.evaluate(({id,result})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentThumbnails',requestId:id,result:{items:[{...result,name:'zeta'}]}}})),{id:retryRequest.requestId,result:PREVIEW});
+    await page.waitForFunction(()=>document.querySelectorAll('#component-catalog .component-card-thumb svg').length===2);
+    assert.equal(await page.$eval('#component-catalog button[aria-label="Retry failed component shape thumbnails"]',b=>b.hidden),true,'retry control remained visible after recovery');
+    assert.deepEqual(await page.evaluate(()=>({drawn:drawSource.getFeatures().length,selected:selectedFeatures.getLength()})),{drawn:0,selected:0},'thumbnail retry entered placement or selection');
     assert.equal(await page.evaluate(()=>__sent.filter(m=>m.type==='previewComponent').length),0,'icon loading required selection');
     await page.screenshot({path:path.join(out,'catalog.png')});
     await page.click('#component-catalog .component-card');

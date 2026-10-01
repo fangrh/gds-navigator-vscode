@@ -19,6 +19,7 @@ not a universal frame-rate or end-to-end latency improvement.
 | Pointer coordinates | A 201-event burst writes the coordinate label once per frame with the latest point. Identical displayed values skip the DOM write; mouse leave clears the label even during a pending update. Browser fixture: test/reliability/eda-workbench.test.js. |
 | Inspector activation | A 201-change burst schedules one resize and saves its final panel state once. Reopening the active panel 201 times schedules no work. Browser checks also cover tab/panel labels, arrow navigation, focus restoration and compact layouts. |
 | Component ports | Only dirty live factory groups repeat rigid-geometry verification. With two placed groups, moving one recomputes one group and retains the other group's exact port ID and center. Full-versus-cached output checks cover translation, rotation, deformation rejection, conversion, rename, reset and removal. |
+| Layer visibility | A document-scoped layer index updates only affected shapes. A three-layer, 3,000-feature browser fixture performs 1,000 visibility writes and zero layer-key scans per toggle. Hidden selections are removed; exact coordinates and source identity remain. |
 
 Properties continue to preserve exact numeric and mouse transforms. Their
 inspector updates occur at edit completion; geometry updates required for live

@@ -24,13 +24,15 @@
         const heading = el('strong', 'Component catalog');
         const refresh = button('Refresh'); refresh.setAttribute('aria-label', 'Refresh component library');
         refresh.title = 'Reload built-in and project components from gds_components.py';
+        const retryFailed = button('Retry failed shapes'); retryFailed.setAttribute('aria-label', 'Retry failed component shape thumbnails'); retryFailed.hidden = true; retryFailed.disabled = true;
         refresh.addEventListener('click', () => { if (typeof config.onRefresh === 'function') config.onRefresh(); invalidateCache(); open(); });
         const close = button('×'); close.setAttribute('aria-label', 'Close catalog'); close.title = 'Close catalog'; close.addEventListener('click', () => { container.hidden = true; });
         const shell = el('div'); shell.className = 'component-chooser';
-        const top = el('div'); top.style.display = 'flex'; top.style.justifyContent = 'space-between'; top.style.alignItems = 'center'; top.append(heading, category, refresh, close);
+        const top = el('div'); top.style.display = 'flex'; top.style.justifyContent = 'space-between'; top.style.alignItems = 'center'; top.style.flexWrap = 'wrap'; top.style.gap = '6px'; top.append(heading, category, refresh, retryFailed, close);
         shell.append(top, search, status, list, detail); container.textContent = ''; container.appendChild(shell);
         detail.appendChild(el('div', 'Choose a factory to inspect its parameters.'));
         function message(text, isError) { status.textContent = text || ''; status.dataset.level = isError ? 'error' : 'info'; }
+        function updateRetryControl() { const failed = catalog.some(item => thumbnails.get(item.name)?.error); retryFailed.hidden = !failed; retryFailed.disabled = !failed || !!thumbnailRequest; }
         function signature(item) { return '(' + (item.parameters || []).map(p => p.name + (p.required ? '' : '=' + (Object.prototype.hasOwnProperty.call(p, 'default') ? JSON.stringify(p.default) : '…'))).join(', ') + ')'; }
         function defaults() { return {}; }
         function settingsKey(item, value) { return item.name + '|' + JSON.stringify(value); }
@@ -71,9 +73,9 @@
         function loadThumbnails(){
             thumbnailTimer=null;if(thumbnailRequest||container.hidden)return;
             const names=Array.from(visibleNames).filter(name=>!thumbnails.has(name)).slice(0,8);if(!names.length)return;
-            const requestId='thumb-'+String(++requestSerial);thumbnailRequest={requestId,names};
+            const requestId='thumb-'+String(++requestSerial);thumbnailRequest={requestId,names}; retryFailed.disabled = true; updateRetryControl();
             names.forEach(name=>{const item=catalog.find(x=>x.name===name);if(item&&item._thumbnail)item._thumbnail.textContent='Loading shape…';});
-            thumbnailDeadline=setTimeout(()=>{if(thumbnailRequest&&thumbnailRequest.requestId===requestId){names.forEach(name=>thumbnails.set(name,{error:'Preview timed out; click to retry'}));thumbnailRequest=null;renderList();}},50000);
+            thumbnailDeadline=setTimeout(()=>{if(thumbnailRequest&&thumbnailRequest.requestId===requestId){names.forEach(name=>thumbnails.set(name,{error:'Preview timed out; click Retry failed shapes'}));thumbnailRequest=null;thumbnailDeadline=null;renderList();}},50000);
             post({type:'requestComponentThumbnails',requestId,names});
         }
         function renderList() {
@@ -81,7 +83,7 @@
             const matches = catalog.filter(item => (!wanted || categoryName(item) === wanted) && (!query || item.name.toLowerCase().includes(query) || String(item.description || '').toLowerCase().includes(query))).slice(0, 500);
             const wantedNames = new Set(matches.map(item => item.name));
             rows.forEach((entry, name) => { if (!wantedNames.has(name)) { if (observer) observer.unobserve(entry.row); visibleNames.delete(name); entry.row.remove(); rows.delete(name); } });
-            if (!matches.length) { list.textContent = ''; emptyMessage = el('div', catalog.length ? 'No matching components.' : 'No components loaded.'); emptyMessage.className = 'component-catalog-empty'; list.appendChild(emptyMessage); return; }
+            if (!matches.length) { list.textContent = ''; emptyMessage = el('div', catalog.length ? 'No matching components.' : 'No components loaded.'); emptyMessage.className = 'component-catalog-empty'; list.appendChild(emptyMessage); updateRetryControl(); return; }
             if (emptyMessage) { list.textContent = ''; emptyMessage = null; }
             matches.forEach((item, index) => {
                 let entry = rows.get(item.name);
@@ -95,7 +97,7 @@
                 if (list.children[index] !== entry.row) { if (typeof list.insertBefore === 'function') list.insertBefore(entry.row, list.children[index] || null); else list.appendChild(entry.row); }
                 if (observer) observer.observe(entry.row); else if (visibleNames.size < 8) visibleNames.add(item.name);
             });
-            scheduleThumbnails();
+            scheduleThumbnails(); updateRetryControl();
         }
         function updateSelectedRow() { rows.forEach(entry => entry.row.setAttribute('aria-selected', String(entry.item === selected))); }
         function showLargePreview(result) { if (!largePreview) { largePreview = el('div'); detail.appendChild(largePreview); } largePreview.textContent = ''; largePreview.appendChild(geometrySvg(result.geojson, true)); }
@@ -115,15 +117,17 @@
             if (!msg || typeof msg !== 'object') return false;
             if(msg.type==='componentThumbnails'&&thumbnailRequest&&msg.requestId===thumbnailRequest.requestId){
                 clearTimeout(thumbnailDeadline);const items=msg.result&&msg.result.items||[];
-                thumbnailRequest.names.forEach(name=>{const value=items.find(x=>x.name===name)||{error:'Shape unavailable'}; thumbnails.set(name,value); const entry=rows.get(name); if(entry){ if(value.geojson) applyThumbnail(entry.item,value,entry.thumb); else {entry.thumb.textContent=(entry.item.parameters||[]).some(p=>p.required)?'Settings required':'Preview unavailable'; entry.thumb.title=value.error||'';} }});thumbnailRequest=null;scheduleThumbnails();return true;
+                thumbnailRequest.names.forEach(name=>{const value=items.find(x=>x.name===name)||{error:'Shape unavailable'}; thumbnails.set(name,value); const entry=rows.get(name); if(entry){ if(value.geojson) applyThumbnail(entry.item,value,entry.thumb); else {entry.thumb.textContent=(entry.item.parameters||[]).some(p=>p.required)?'Settings required':'Preview unavailable'; entry.thumb.title=value.error||'';} }});thumbnailRequest=null;updateRetryControl();scheduleThumbnails();updateRetryControl();return true;
             }
-            if(msg.type==='componentError'&&thumbnailRequest&&msg.requestId===thumbnailRequest.requestId){clearTimeout(thumbnailDeadline);thumbnailRequest.names.forEach(name=>{const value={error:msg.error}; thumbnails.set(name,value); const entry=rows.get(name); if(entry){entry.thumb.textContent=(entry.item.parameters||[]).some(p=>p.required)?'Settings required':'Preview unavailable';entry.thumb.title=msg.error;}});thumbnailRequest=null;scheduleThumbnails();return true;}
+            if(msg.type==='componentError'&&thumbnailRequest&&msg.requestId===thumbnailRequest.requestId){clearTimeout(thumbnailDeadline);thumbnailDeadline=null;thumbnailRequest.names.forEach(name=>{const value={error:msg.error}; thumbnails.set(name,value); const entry=rows.get(name); if(entry){entry.thumb.textContent=(entry.item.parameters||[]).some(p=>p.required)?'Settings required':'Preview unavailable';entry.thumb.title=msg.error;}});thumbnailRequest=null;updateRetryControl();scheduleThumbnails();return true;}
 
             if (msg.type === 'componentCatalog' && msg.requestId === catalogRequest) { catalog = msg.result && Array.isArray(msg.result.components) ? msg.result.components.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))) : []; setCategories(); renderList(); const warnings = msg.result && msg.result.warnings || []; message(`${catalog.length} components available.${warnings.length ? ' ' + warnings.join(' ') : ''}`, warnings.length > 0); return true; }
             if (msg.type === 'componentPreview' && msg.requestId === previewRequest) { preview = msg.result; previewRequest = null; if (preview) { cache.set(previewKey, preview); while (cache.size > MAX_CACHE) cache.delete(cache.keys().next().value); applyThumbnail(selected, preview); } insertButton.hidden = !preview; placeButton.hidden=!preview; if (preview) showLargePreview(preview); message(preview ? 'Click the canvas to place; Tab edits placement.' : 'Preview was empty.'); if(preview&&placeWhenReady){placeWhenReady=false;onPlace(preview);} return true; }
             if (msg.type === 'componentError' && (msg.requestId === catalogRequest || msg.requestId === previewRequest)) { message(String(msg.error || 'Component request failed.'), true); return true; } return false;
         }
-        function invalidateCache() { cache.clear();thumbnails.clear();svgCache.clear();visibleNames.clear();clearTimeout(thumbnailTimer);clearTimeout(thumbnailDeadline);thumbnailRequest=null;placeWhenReady=false;placeButton.hidden=true; catalog = []; catalogRequest = null; previewRequest = null; previewKey = null; selected = null; preview = null; previewButton.disabled=true; insertButton.hidden = true; detail.textContent = ''; largePreview = null; rows.forEach(entry => { if(observer) observer.unobserve(entry.row); entry.row.remove(); }); rows.clear(); renderList(); }
+        function retryFailedThumbnails() { if (thumbnailRequest) return; const names = catalog.filter(item => thumbnails.get(item.name)?.error).map(item => item.name); if (!names.length) return; names.forEach(name => { thumbnails.delete(name); visibleNames.add(name); }); renderList(); updateRetryControl(); }
+        retryFailed.addEventListener('click', retryFailedThumbnails);
+        function invalidateCache() { cache.clear();thumbnails.clear();svgCache.clear();visibleNames.clear();clearTimeout(thumbnailTimer);clearTimeout(thumbnailDeadline);thumbnailRequest=null;placeWhenReady=false;placeButton.hidden=true; catalog = []; catalogRequest = null; previewRequest = null; previewKey = null; selected = null; preview = null; previewButton.disabled=true; insertButton.hidden = true; retryFailed.hidden = true; retryFailed.disabled = true; detail.textContent = ''; largePreview = null; rows.forEach(entry => { if(observer) observer.unobserve(entry.row); entry.row.remove(); }); rows.clear(); renderList(); }
         container.hidden = true; return { open, handleMessage, cancelPendingPlacement:()=>{placeWhenReady=false;}, invalidateCache };
     }
     root.ComponentChooser = { mount };

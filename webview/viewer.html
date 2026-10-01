@@ -336,6 +336,7 @@ var ctrlPressed = false;
 var selectionCycle = 0;
 var allFeatures = [];
 var layerColors = {};
+var featuresByLayer = new Map();
 var layoutPortRecords = [];
 var portsVisible = vscode?.getState?.()?.portsVisible !== false;
 var portNamesVisible = vscode?.getState?.()?.portNamesVisible !== false;
@@ -547,7 +548,7 @@ document.addEventListener('keyup', function(e) {
 // Selection management
 // ============================================================
 function addToSelection(features) {
-    features=expandFactorySelection(features);
+    features=expandFactorySelection(features).filter(function(f){return f.get('visible')!==false;});
     var selectedSet=new Set(selectedFeatures.getArray());
     features.forEach(function(f) {
         if (!selectedSet.has(f)) {
@@ -567,7 +568,7 @@ function removeFromSelection(features) {
 }
 
 function replaceSelection(features) {
-    features=expandFactorySelection(features);
+    features=expandFactorySelection(features).filter(function(f){return f.get('visible')!==false;});
     if(features.length&&typeof imageCanvasSelected!=='undefined')imageCanvasSelected=false;
     selectedFeatures.forEach(function(f) { f.set('selected', false); });
     selectedFeatures.clear();
@@ -937,6 +938,7 @@ var hiddenVectorStyle = new ol.style.Style({});
 var vectorLayer = new ol.layer.Vector({
     source: source,
     style: function(feature) {
+        if (feature.get('visible') === false) return hiddenVectorStyle;
         var selected = feature.get('selected');
         var labelText = feature.get('label');
         if (selected) {
@@ -1785,6 +1787,7 @@ function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
     layoutPortRecords = PortOverlay.layoutPorts(geojson);
     allFeatures = [];
     layerColors = {};
+    featuresByLayer.clear();
 
     geojson.features.forEach(function(feature, index) {
         var props = feature.properties || {};
@@ -1805,6 +1808,9 @@ function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
             bbox: props.bbox || []
         });
         allFeatures.push(f);
+        var layerFeatures=featuresByLayer.get(key);
+        if(!layerFeatures){layerFeatures=[];featuresByLayer.set(key,layerFeatures);}
+        layerFeatures.push(f);
     });
     source.addFeatures(allFeatures);
 
@@ -1975,14 +1981,20 @@ function buildLegend() {
         var row = document.createElement('div');
         row.className = 'legend-row';
         row.tabIndex=0;row.setAttribute('role','checkbox');row.setAttribute('aria-checked','true');row.setAttribute('aria-label','Show layer '+key);
-        row.onkeydown=function(event){if(event.key===' '||event.key==='Enter'){event.preventDefault();row.click();}};
-        row.innerHTML = '<span class="swatch" style="background:' + layerColors[key] + ';" data-key="' + key + '"></span> ' + key;
+        row.onkeydown=function(event){if(event.key===' '||event.key==='Enter'){event.preventDefault();event.stopPropagation();row.click();}};
+        var layerFeatures=featuresByLayer.get(key)||[];
+        var swatch=document.createElement('span');swatch.className='swatch';swatch.style.background=layerColors[key];swatch.dataset.key=key;
+        row.appendChild(swatch);row.appendChild(document.createTextNode(' '+key+' · '+layerFeatures.length));
         row.onclick = function() {
             var swatch = row.querySelector('.swatch');
             var hidden = swatch.classList.toggle('hidden');
             row.setAttribute('aria-checked',String(!hidden));
             usageEvent('ui.control',{phase:'intent',control:'layer.visibility'});
-            allFeatures.forEach(function(f) { if (f.get('layerKey') === key) f.set('visible', !hidden); });
+            layerFeatures.forEach(function(f) { f.set('visible', !hidden); });
+            if(hidden){
+                var remaining=selectedFeatures.getArray().filter(function(f){return f.get('visible')!==false;});
+                if(remaining.length!==selectedFeatures.getLength()){replaceSelection(remaining);onSelectionChanged();}
+            }
             vectorLayer.changed();
         };
         div.appendChild(row);
