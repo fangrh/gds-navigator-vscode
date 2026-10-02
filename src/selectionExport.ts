@@ -200,8 +200,8 @@ export function selectionDocument(gdsPath: string, hash: string | undefined, com
     const annotations = components.filter(c => c.drawn).map(c => {
         const geometryValid = validGeometry(c.geometry);
         const intentValid = c.intent === undefined || validateIntent(c.intent);
-        const routeValid = c.route === undefined || (ManhattanRoute.validateSpec(c.route) && c.geometry?.type === 'LineString' && ManhattanRoute.validate(c.geometry.coordinates));
-        if(!routeValid)addIssue('invalid_route',String(c.provId),'Route must have finite horizontal/vertical centerline segments, positive trace width, and a numeric layer pair.');
+        const routeValid = c.route === undefined || (ManhattanRoute.validateSpec(c.route) && c.geometry?.type === 'LineString' && ManhattanRoute.validate(c.geometry.coordinates,c.route.style));
+        if(!routeValid)addIssue('invalid_route',String(c.provId),'Route must have finite centerline segments matching its angle style, positive trace width, and a numeric layer pair.');
         const primitiveValid = c.primitive === undefined || (LayoutPrimitives.validate(c.primitive) && validPrimitive(c.primitive));
         if (!geometryValid) { addIssue('invalid_geometry', String(c.provId), 'Drawing geometry is malformed or contains non-finite coordinates.'); }
         if (!intentValid) { addIssue('invalid_intent', String(c.provId), 'Drawing intent must contain string text/action, an array of target IDs, and string snapshot/document paths.'); }
@@ -213,7 +213,7 @@ export function selectionDocument(gdsPath: string, hash: string | undefined, com
         const primitiveGeometryValid = c.primitive === undefined || !!info;
         if (primitiveValid && geometryValid && !primitiveGeometryValid) addIssue('unsupported_primitive_geometry', String(c.provId), 'The component geometry cannot be described as one finite polygon ring. Exact geometry is retained; review before construction.');
         return { id: c.provId, geometry: c.geometry, measurements: c.shape, ...factoryInfo(c, validFactory(c.factory) ? factoryGroupInfoById.get(c.factory.groupId) : undefined),
-            ...(c.route === undefined ? {} : { route: c.route, route_convention: { geometry: 'Manhattan centerline', units: 'um', width: 'full trace width', corners: 'sharp draft bends; no bend radius or port attachment inferred', validation: 'orthogonality only; no connectivity or design-rule check' } }),
+            ...(c.route === undefined ? {} : { route: c.route, route_convention: { geometry: c.route.style === 'octilinear' ? 'H/V/45 centerline' : 'Manhattan centerline', units: 'um', width: 'full trace width', corners: 'centerline bends with round stroke joins for clearance; no photonic bend radius or port attachment inferred', validation: 'angle constraints only on export; automatic clearance check is against the detected obstacles at planning time, not a fabrication or connectivity check' } }),
             ...((c.layer === undefined && c.primitive?.layer === undefined) ? {} : { target_layer: c.route?.layer ?? c.primitive?.layer ?? c.layer }),
             ...(info?.primitive === undefined ? {} : { primitive: info.primitive }),
             ...(info?.historical_primitive === undefined ? {} : { historical_primitive: info.historical_primitive }),
@@ -255,6 +255,6 @@ export function validateAnnotations(value: unknown): value is any[] {
         if (!a || typeof a.id !== 'string' || ids.has(a.id) || !a.geometry) { return false; }
         ids.add(a.id);
         const g = a.geometry;
-        return (a.route === undefined || (ManhattanRoute.validateSpec(a.route) && g.type === 'LineString' && ManhattanRoute.validate(g.coordinates))) && (a.shapeType !== 'route' || a.route !== undefined) && (a.editRotation === undefined || (typeof a.editRotation === 'number' && Number.isFinite(a.editRotation))) && validGeometry(g) && (a.intent === undefined || validateIntent(a.intent)) && (a.primitive === undefined || validPrimitive(a.primitive)) && (a.factory === undefined || validFactory(a.factory));
+        return (a.route === undefined || (ManhattanRoute.validateSpec(a.route) && g.type === 'LineString' && ManhattanRoute.validate(g.coordinates,a.route.style))) && (a.shapeType !== 'route' || a.route !== undefined) && (a.editRotation === undefined || (typeof a.editRotation === 'number' && Number.isFinite(a.editRotation))) && validGeometry(g) && (a.intent === undefined || validateIntent(a.intent)) && (a.primitive === undefined || validPrimitive(a.primitive)) && (a.factory === undefined || validFactory(a.factory));
     });
 }

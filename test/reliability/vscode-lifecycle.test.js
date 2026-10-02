@@ -23,12 +23,21 @@ async function main(){
    fs.writeFileSync(builder,`from pathlib import Path\nPath(${JSON.stringify(files[0])}).write_bytes(Path(${JSON.stringify(path.join(root,'test/fixtures/jj_pad_center_100_test.gds'))}).read_bytes())\n`);
  }
  const exe=process.env.VSCODE_EXE||'C:/Program Files/Microsoft VS Code/Code.exe';
+ const testVsix=process.env.GDS_TEST_VSIX;
+ if(testVsix){
+   assert(fs.existsSync(testVsix),'GDS_TEST_VSIX must point to an existing package');
+   const bin=path.join(path.dirname(exe),'bin');
+   const cliRelative=fs.readFileSync(path.join(bin,'code.cmd'),'utf8').match(/"%~dp0([^"\r\n]+cli\.js)"/i)?.[1];
+   const cli=cliRelative?path.resolve(bin,cliRelative):path.join(path.dirname(exe),'resources/app/out/cli.js');
+   assert(fs.existsSync(cli),'VS Code CLI entry point is unavailable');
+   cp.execFileSync(exe,[cli,`--user-data-dir=${path.join(dir,'profile')}`,`--extensions-dir=${path.join(dir,'extensions')}`,'--install-extension',path.resolve(testVsix),'--force'],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},windowsHide:true,stdio:'pipe',timeout:120000});
+ }
  const records=[];let id=0;
  async function request(action,extra={}){const req={id:++id,action,...extra};fs.writeFileSync(path.join(bridge,'request.json'),JSON.stringify(req));return until(()=>{const r=JSON.parse(fs.readFileSync(path.join(bridge,'response.json'),'utf8'));if(r.id!==req.id)return false;if(r.error)throw new Error(r.error);return {value:r.result};});}
  for(let cycle=0;cycle<(setupEnvMode?3:provenanceRoot||usageMode||workOrdersMode||handoffMode?1:3);cycle++){
    for(const name of ['ready.json','request.json','response.json'])try{fs.unlinkSync(path.join(bridge,name));}catch{}
    const port=19330+cycle;
-   const child=cp.spawn(exe,[workspace,'--new-window','--disable-workspace-trust','--skip-welcome','--skip-release-notes',`--user-data-dir=${path.join(dir,'profile')}`,`--extensions-dir=${path.join(dir,'extensions')}`,`--extensionDevelopmentPath=${root}`,`--extensionDevelopmentPath=${driver}`,`--remote-debugging-port=${port}`],{env:{...process.env,...(autoEnvMode?{VIRTUAL_ENV:path.join(root,'.venv-fork')}:{}),GDS_TEST_BRIDGE:bridge},windowsHide:true,stdio:['ignore','pipe','pipe']});
+   const child=cp.spawn(exe,[workspace,'--new-window','--disable-workspace-trust','--skip-welcome','--skip-release-notes',`--user-data-dir=${path.join(dir,'profile')}`,`--extensions-dir=${path.join(dir,'extensions')}`,...(testVsix?[]:[`--extensionDevelopmentPath=${root}`]),`--extensionDevelopmentPath=${driver}`,`--remote-debugging-port=${port}`],{env:{...process.env,...(autoEnvMode?{VIRTUAL_ENV:path.join(root,'.venv-fork')}:{}),GDS_TEST_BRIDGE:bridge},windowsHide:true,stdio:['ignore','pipe','pipe']});
    let log='';child.stdout.on('data',b=>log+=b);child.stderr.on('data',b=>log+=b);
    let browser;
    try {
@@ -272,9 +281,13 @@ async function main(){
          for(const [x,y] of [[.2,.2],[.35,.3],[.45,.2]])await frame.page().mouse.click(canvas.x+canvas.width*x,canvas.y+canvas.height*y);
          await frame.page().keyboard.press('Enter');
          await until(()=>frame.evaluate(()=>drawSource.getFeatures().some(f=>f.get('route'))));
+         // Let OpenLayers' delayed singleclick settle before editing route properties.
+         await sleep(350);
+         await frame.evaluate(()=>{replaceSelection([drawSource.getFeatures().find(f=>f.get('route'))]);onSelectionChanged();showRouteProperties();});
          assert(await frame.evaluate(()=>{var f=drawSource.getFeatures().find(f=>f.get('route'));return ManhattanRoute.validate(f.getGeometry().getCoordinates())&&f.get('intent').targetIds.length>0;}));
          await frame.evaluate(()=>{map.getTargetElement().focus();});await frame.page().keyboard.press('Tab');
          await frame.$eval('#route-width',el=>{el.value='3.25';});await frame.click('#route-apply');
+         fs.writeFileSync(path.join(output,'route-edit-diagnostic.json'),JSON.stringify(await frame.evaluate(()=>({error:document.getElementById('route-error').textContent,width:document.getElementById('route-width').value,selected:selectedFeatures.getArray().map(f=>f.get('route')),routes:drawSource.getFeatures().filter(f=>f.get('route')).map(f=>f.get('route'))})),null,2));
          await until(()=>frame.evaluate(()=>drawSource.getFeatures().find(f=>f.get('route'))?.get('route').width===3.25));
          await frame.click('#copy-btn');
          await until(async()=>{const text=(await request('clipboard')).value;return text.includes('route_convention')&&text.includes('Manhattan centerline')&&text.includes('3.25');});
@@ -286,6 +299,27 @@ async function main(){
          await frame.evaluate(id=>{replaceSelection([drawSource.getFeatures().find(f=>f.get('annotationId')===id)]);onSelectionChanged();deleteDrawn();},routeId);
          await until(()=>frame.evaluate(()=>drawSource.getFeatures().length===1));
          records.push({scenario:'actual-route-button-waypoints-tuning-copy-editor-reopen',status:'passed'});
+         // Exercise packaged worker CSP, real GDS obstacles and a transformed image mask.
+         await frame.evaluate(async()=>{
+           const canvas=document.createElement('canvas');canvas.width=32;canvas.height=32;const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,32,32);ctx.fillStyle='black';ctx.fillRect(10,5,12,22);
+           const img=new Image();img.src=canvas.toDataURL();await img.decode();microImages.push({imageId:'routing-test',name:'routing-test.png',img,cx:40,cy:3,umPerPx:.5,rotDeg:0,opacity:1,visible:true,locked:true});
+         });
+         await frame.click('#route-btn');await frame.select('#route-method','auto');
+         await frame.$eval('#route-width',el=>{el.value='1';el.dispatchEvent(new Event('input'));});
+         await frame.evaluate(async()=>{map.updateSize();map.getView().cancelAnimations();map.getView().fit([-15,-22,90,32],{size:map.getSize(),padding:[30,30,30,30],duration:0});await new Promise(requestAnimationFrame);map.renderSync();});
+         for(const xy of [[-5,3],[80,3]]){const data=await frame.evaluate(c=>({pixel:map.getPixelFromCoordinate(c),size:map.getSize(),center:map.getView().getCenter(),resolution:map.getView().getResolution()}),xy),box=await(await frame.$('#map')).boundingBox();fs.appendFileSync(path.join(output,'auto-clicks.jsonl'),JSON.stringify({xy,data,box})+'\n');await frame.page().mouse.click(box.x+data.pixel[0]*box.width/data.size[0],box.y+data.pixel[1]*box.height/data.size[1]);}
+         await until(()=>frame.evaluate(()=>!document.getElementById('route-use').disabled));
+         assert.equal(await frame.evaluate(()=>drawSource.getFeatures().length),1,'preview committed before confirmation');
+         assert(await frame.evaluate(()=>routeAssist.collect().imagePolygons.length>0),'image obstacles were not generated');
+         await frame.page().screenshot({path:path.join(output,'automatic-route-preview.png')});
+         await frame.click('#route-use');await until(()=>frame.evaluate(()=>drawSource.getFeatures().some(f=>f.get('route')?.method==='auto')));
+         const autoId=await frame.evaluate(()=>drawSource.getFeatures().find(f=>f.get('route')?.method==='auto').get('annotationId'));
+         await frame.click('#copy-btn');await until(async()=>{const text=(await request('clipboard')).value;return text.includes('"avoidImages": true')&&text.includes('"method": "auto"');});
+         fs.writeFileSync(path.join(output,'automatic-route.yaml'),(await request('clipboard')).value);
+         await request('close');await request('open',{file:files[i]});await reconnect();frame=await frameFor(files[i]);
+         await until(()=>frame.evaluate(id=>drawSource.getFeatures().some(f=>f.get('annotationId')===id&&f.get('route')?.method==='auto'),autoId));
+         await frame.evaluate(id=>{replaceSelection([drawSource.getFeatures().find(f=>f.get('annotationId')===id)]);onSelectionChanged();deleteDrawn();},autoId);
+         records.push({scenario:'installed-auto-route-gds-image-mask-preview-copy-reopen',status:'passed'});
        }
        if(instructionMode&&i===0){
          assert.equal(await frame.$('#insert-gds-shape'),null);
@@ -398,7 +432,7 @@ async function main(){
      fs.writeFileSync(path.join(output,`cycle-${cycle+1}.log`),log);
    }
  }
- fs.writeFileSync(path.join(output,'report.json'),JSON.stringify({status:'passed',workspace,records},null,2));
+ fs.writeFileSync(path.join(output,'report.json'),JSON.stringify({status:'passed',workspace,testVsix:testVsix||null,extensionsDir:path.join(dir,'extensions'),records},null,2));
  console.log(JSON.stringify({status:'passed',records:records.length,output}));
 }
 main().catch(e=>{const failure={status:'failed',error:String(e.stack||e),time:new Date().toISOString()};fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,'failure-'+Date.now()+'.json'),JSON.stringify(failure,null,2));fs.writeFileSync(path.join(output,'report.json'),JSON.stringify(failure,null,2));console.error(e);process.exitCode=1;});

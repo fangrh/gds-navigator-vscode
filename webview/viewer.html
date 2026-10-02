@@ -157,15 +157,28 @@ __EDA_CSS__
                 Loading layout...
             </div>
             <section id="route-controls" aria-label="Manhattan route properties" hidden>
-              <strong>Route draft · Manhattan</strong><button id="route-close" class="panel-close" aria-label="Close route properties">×</button>
-              <p>Click waypoints; Enter or double-click finishes. Every segment stays horizontal or vertical.</p>
+              <strong>Route a trace</strong><button id="route-close" class="panel-close" aria-label="Close route properties">×</button>
+              <label>Workflow <select id="route-method"><option value="manual">Manual waypoints</option><option value="guided">Follow guide</option><option value="auto">Auto · endpoints</option></select></label>
+              <label>Style <select id="route-style"><option value="manhattan">Manhattan · 90°</option><option value="octilinear">Electrical · 45°</option></select></label>
+              <p id="route-help">Click waypoints; Enter finishes, Backspace removes the last point, Escape cancels.</p>
               <label>Trace width (µm) <input id="route-width" type="number" min="0" step="any" value="1"></label>
               <label>Layer/datatype <input id="route-layer" value="4/0"></label>
               <label>New bend <select id="route-order"><option value="h">Horizontal first</option><option value="v">Vertical first</option></select></label>
+              <div id="route-assist-controls" hidden>
+                <label>Clearance (µm) <input id="route-clearance" type="number" min="0" step="any" value="1"></label>
+                <label>Search grid (µm) <input id="route-grid" type="number" min="0" step="any" value="1"></label>
+                <label><input id="route-avoid-gds" type="checkbox" checked> Avoid all GDS and drawn geometry</label>
+                <label><input id="route-avoid-images" type="checkbox" checked> Avoid visible image contours</label>
+                <label>Image obstacles <select id="route-image-mode"><option value="filled">Contours + fill</option><option value="contours">Contours only</option></select></label>
+                <label>Edge threshold <input id="route-threshold" type="number" min="1" max="255" value="40"></label>
+                <button id="route-mask">Preview obstacles</button><button id="route-redraw">Draw reference / endpoints</button>
+                <button id="route-plan">Find route</button><button id="route-use" disabled>Use route</button><button id="route-cancel-preview">Cancel preview</button>
+                <p>Red areas are detected image obstacles. Review the mask and image alignment. Open or faint edges may leave gaps. Endpoints must be in clear space; pad attachment is not inferred.</p>
+              </div>
+              <div id="route-error" role="status" aria-live="polite"></div>
               <label for="route-points">Centerline points (µm, JSON)</label><textarea id="route-points" rows="7" spellcheck="false" aria-label="Route centerline points"></textarea>
               <div><button id="route-finish">Finish route ↵</button><button id="route-apply">Apply points / width</button><button id="route-move-segment">Drag a segment</button></div>
               <p>Drag the selected route to move it, or choose Drag a segment to adjust one segment perpendicular to itself. Moving the first or last segment also moves that endpoint. Edit points to add/remove bends or set endpoints.</p>
-              <div id="route-error" role="status"></div>
             </section>
             <section id="shape-properties" aria-label="Shape properties" hidden></section>
             <section id="instruction-list" aria-label="Work orders for this GDS" hidden><strong>Work orders · this GDS</strong><button id="instructions-close" class="panel-close" aria-label="Close instructions" title="Close instructions">×</button><p id="instruction-location"></p><p>Orders are processed in sequence for this GDS. Each reference keeps the requirement and selected-element snapshot.</p><div class="work-order-filters"><input id="work-order-search" type="search" aria-label="Search work orders" placeholder="Search reference or requirement"><select id="work-order-filter" aria-label="Work order status"><option value="all">All orders</option><option value="open">Open</option><option value="done">Done</option><option value="reverted">Withdrawn / undone</option></select><button id="instructions-refresh">Refresh</button></div><p id="work-order-summary" role="status"></p><div id="instruction-feedback" role="status"></div><div id="instruction-records"></div></section>
@@ -376,7 +389,7 @@ var drawLayer = new ol.layer.Vector({
     source: drawSource,
     style: function(feature, resolution) {
         if(feature.get('route')){var spec=feature.get('route'),selected=feature.get('selected');return routeStyleCache(JSON.stringify([selected, spec.width, resolution]), function(){return [
-            new ol.style.Style({stroke:new ol.style.Stroke({color:selected?'rgba(137,180,250,.4)':'rgba(243,139,168,.3)',width:Math.max(1,Math.min(2048,spec.width/resolution)),lineCap:'butt',lineJoin:'miter'})}),
+            new ol.style.Style({stroke:new ol.style.Stroke({color:selected?'rgba(137,180,250,.4)':'rgba(243,139,168,.3)',width:Math.max(1,Math.min(2048,spec.width/resolution)),lineCap:'butt',lineJoin:'round'})}),
             new ol.style.Style({stroke:new ol.style.Stroke({color:selected?'#ffffff':'#f38ba8',width:2,lineDash:[6,4],lineCap:'butt',lineJoin:'miter'})})];});}
         return feature.get('selected') ? drawStyleSelected : drawStyleDefault;
     }
@@ -468,6 +481,7 @@ drawSource.on('clear', clearPortFeatures);
 // Keyboard handling
 // ============================================================
 document.addEventListener('keydown', function(e) {
+    if(e.key==='Backspace'&&currentMode==='route'&&!/INPUT|TEXTAREA|SELECT|BUTTON/.test(e.target.tagName)&&!e.target.isContentEditable){e.preventDefault();return;}
     if(e.key==='Enter'&&currentMode==='route'&&!/INPUT|TEXTAREA|SELECT|BUTTON/.test(e.target.tagName)){e.preventDefault();finishRouteDraft();return;}
     if(e.key==='Tab'&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.target.isContentEditable&&!/INPUT|TEXTAREA|SELECT|BUTTON/.test(e.target.tagName)){
         if(typeof imageCanvasSelected!=='undefined'&&imageCanvasSelected){e.preventDefault();showSelectedImageProperties();return;}
@@ -823,6 +837,7 @@ function setMode(mode) {
     if (isDrawMode && drawInteractions[mode]) {
         drawInteractions[mode].setActive(true);
     }
+    if(typeof routeAssist!=='undefined'&&routeAssist)routeAssist.setActive(mode==='route');
 
     document.querySelectorAll('.tool-btn[data-mode]').forEach(function(btn) {
         if (btn.dataset.mode === 'snap' || btn.dataset.mode === 'delete') return;
@@ -989,7 +1004,7 @@ var map = new ol.Map({
 var selectClick = new ol.interaction.Select({
     layers: [portLayer, vectorLayer, drawLayer],
     hitTolerance: 8,
-    condition:function(event){return Date.now() >= (factorySelectionResumeAt||0) && ol.events.condition.singleClick(event);},
+    condition:function(event){return Date.now() >= Math.max(factorySelectionResumeAt||0,routeSelectionResumeAt||0) && ol.events.condition.singleClick(event);},
     style: null,  // use layer style function
     multi: true
 });
@@ -1115,29 +1130,30 @@ drawPolygon.setActive(false);
 map.addInteraction(drawPolygon);
 drawInteractions['polygon'] = drawPolygon;
 
-var routeDraftIntent=null,routePreview=[],routeRaw=[],routePreviewGeometry=null;
+var routeDraftIntent=null,routePreview=[],routeRaw=[],routePreviewGeometry=null,routeSelectionResumeAt=0;
 function routeSettings(){
     var value=document.getElementById('route-layer').value.trim(),match=/^(\d+)\s*\/\s*(\d+)$/.exec(value);
-    var spec={version:1,width:Number(document.getElementById('route-width').value),layer:match?[Number(match[1]),Number(match[2])]:[],horizontalFirst:document.getElementById('route-order').value==='h'};
+    var spec={version:1,width:Number(document.getElementById('route-width').value),layer:match?[Number(match[1]),Number(match[2])]:[],horizontalFirst:document.getElementById('route-order').value==='h',style:document.getElementById('route-style').value,method:document.getElementById('route-method').value};
     if(!ManhattanRoute.validateSpec(spec))throw Error('Use a positive width and layer/datatype integers from 0 to 65535.');return spec;
 }
 var drawRoute=new ol.interaction.Draw({source:drawSource,type:'LineString',stopClick:true,
     geometryFunction:function(coordinates,geometry){
-        routeRaw=coordinates.map(p=>p.slice());routePreview=coordinates.length<2?coordinates.map(p=>p.slice()):ManhattanRoute.orthogonalize(coordinates,document.getElementById('route-order').value==='h');
+        routeRaw=coordinates.map(p=>p.slice());routePreview=coordinates.length<2?coordinates.map(p=>p.slice()):ManhattanRoute.orthogonalize(coordinates,document.getElementById('route-order').value==='h',document.getElementById('route-style').value);
         if(!geometry)geometry=new ol.geom.LineString(routePreview);else geometry.setCoordinates(routePreview);routePreviewGeometry=geometry;return geometry;
-    },finishCondition:function(){return ManhattanRoute.validate(routePreview);}
+    },finishCondition:function(){return ManhattanRoute.validate(routePreview,document.getElementById('route-style').value);}
 });drawRoute.setActive(false);map.addInteraction(drawRoute);drawInteractions.route=drawRoute;
-function finishRouteDraft(){if(currentMode!=='route')return;if(!ManhattanRoute.validate(routePreview)){document.getElementById('route-error').textContent='Click at least two different points.';return;}try{routeSettings();drawRoute.finishDrawing();}catch(error){document.getElementById('route-error').textContent=error.message;}}
+function finishRouteDraft(){if(currentMode!=='route')return;if(routeAssist&&routeAssist.isAssisted()){routeAssist.finish();return;}if(!ManhattanRoute.validate(routePreview,document.getElementById('route-style').value)){document.getElementById('route-error').textContent='Click at least two different points.';return;}try{routeSettings();drawRoute.finishDrawing();}catch(error){document.getElementById('route-error').textContent=error.message;}}
 function finishDrawnRoute(feature){
+    routeSelectionResumeAt=Date.now()+350; // Ignore the completing click delayed by OpenLayers.
     try{
-        var spec=routeSettings(),coordinates=ManhattanRoute.normalize(feature.getGeometry().getCoordinates());if(!ManhattanRoute.validate(coordinates))throw Error('Route requires at least two distinct points.');
+        var spec=routeSettings(),coordinates=ManhattanRoute.normalize(feature.getGeometry().getCoordinates());if(!ManhattanRoute.validate(coordinates,spec.style))throw Error('Route requires at least two distinct points.');
         feature.setGeometry(new ol.geom.LineString(coordinates));feature.set('route',spec);feature.set('layer',spec.layer.join('/'));feature.set('isDrawn',true);feature.set('shapeType','route');feature.set('annotationId',crypto.randomUUID());feature.set('intent',JSON.parse(JSON.stringify(routeDraftIntent||currentIntent())));
         setTimeout(function(){var intent=feature.get('intent');if(!drawSource.hasFeature(feature)||intent.snapshot!==currentLayoutHash||intent.documentPath!==currentGdsPath)return;setMode('select');replaceSelection([feature]);onSelectionChanged();persistAnnotations();showRouteProperties();},0);
     }catch(error){setTimeout(function(){restoringAnnotations=true;try{drawSource.removeFeature(feature);}finally{restoringAnnotations=false;}},0);document.getElementById('route-error').textContent=error.message;}
 }
 function showRouteProperties(){
     var f=selectedShape();if(!f||!f.get('route'))return;if(shapeProperties.isOpen())shapeProperties.hide();
-    var spec=f.get('route');document.getElementById('route-controls').hidden=false;document.getElementById('route-points').value='[\n'+f.getGeometry().getCoordinates().map(p=>'  '+JSON.stringify(p)).join(',\n')+'\n]';document.getElementById('route-points').scrollTop=0;document.getElementById('route-width').value=String(spec.width);document.getElementById('route-layer').value=spec.layer.join('/');document.getElementById('route-order').value=spec.horizontalFirst?'h':'v';document.getElementById('route-apply').disabled=false;document.getElementById('route-move-segment').disabled=false;document.getElementById('route-finish').hidden=true;document.getElementById('route-error').textContent='Route centerline proposal. Select Drag a segment to tune a bend.';
+    var spec=f.get('route');document.getElementById('route-controls').hidden=false;document.getElementById('route-points').value='[\n'+f.getGeometry().getCoordinates().map(p=>'  '+JSON.stringify(p)).join(',\n')+'\n]';document.getElementById('route-points').scrollTop=0;document.getElementById('route-width').value=String(spec.width);document.getElementById('route-layer').value=spec.layer.join('/');document.getElementById('route-order').value=spec.horizontalFirst?'h':'v';document.getElementById('route-style').value=spec.style||'manhattan';document.getElementById('route-method').value='manual';document.getElementById('route-order').disabled=false;document.getElementById('route-assist-controls').hidden=true;document.getElementById('route-apply').disabled=false;document.getElementById('route-move-segment').disabled=spec.style==='octilinear';document.getElementById('route-finish').hidden=true;document.getElementById('route-error').textContent='Route proposal. Edits require a new obstacle check. Use points to tune 45° routes; Manhattan segments can also be dragged.';
 }
 function closeRouteProperties(){cancelRouteSegment();document.getElementById('route-controls').hidden=true;}
 
@@ -1519,11 +1535,21 @@ var routeSegmentPointer=new ol.interaction.Pointer({
 document.getElementById('route-close').onclick=function(){closeRouteProperties();if(currentMode==='route')setMode('select');else onSelectionChanged();map.getTargetElement().focus();};
 document.getElementById('route-controls').addEventListener('keydown',function(event){if(event.key==='Escape'){event.preventDefault();event.stopPropagation();document.getElementById('route-close').click();}});
 document.getElementById('route-finish').onclick=finishRouteDraft;
-document.getElementById('route-order').onchange=function(){if(currentMode==='route'&&routeRaw.length>=2&&routePreviewGeometry){routePreview=ManhattanRoute.orthogonalize(routeRaw,this.value==='h');routePreviewGeometry.setCoordinates(routePreview);}};
+document.getElementById('route-order').onchange=function(){if(currentMode==='route'&&routeRaw.length>=2&&routePreviewGeometry){routePreview=ManhattanRoute.orthogonalize(routeRaw,this.value==='h',document.getElementById('route-style').value);routePreviewGeometry.setCoordinates(routePreview);}};
 document.getElementById('route-apply').onclick=function(){
-    try{var f=selectedShape();if(!f||!f.get('route'))throw Error('Select a route first.');var spec=routeSettings(),points=ManhattanRoute.orthogonalize(JSON.parse(document.getElementById('route-points').value),spec.horizontalFirst);if(!ManhattanRoute.validate(points))throw Error('Route needs at least two distinct finite points.');cancelRouteSegment();f.setGeometry(new ol.geom.LineString(points));f.set('route',spec);f.set('layer',spec.layer.join('/'));persistAnnotations();showRouteProperties();document.getElementById('route-error').textContent='Route saved with Manhattan constraints.';}catch(error){document.getElementById('route-error').textContent=error.message;}
+    try{var f=selectedShape();if(!f||!f.get('route'))throw Error('Select a route first.');var spec=routeSettings(),points=ManhattanRoute.orthogonalize(JSON.parse(document.getElementById('route-points').value),spec.horizontalFirst,spec.style);if(!ManhattanRoute.validate(points,spec.style))throw Error('Route needs at least two distinct finite points.');cancelRouteSegment();f.setGeometry(new ol.geom.LineString(points));f.set('route',spec);f.set('layer',spec.layer.join('/'));persistAnnotations();showRouteProperties();document.getElementById('route-error').textContent='Route saved with chosen angle constraints. Obstacle clearance has not been rechecked.';}catch(error){document.getElementById('route-error').textContent=error.message;}
 };
 document.getElementById('route-move-segment').onclick=function(){var f=selectedShape();if(!f||!f.get('route'))return;cancelShapeTransform();cancelRouteSegment();modifyInteraction.setActive(false);translateInteraction.setActive(false);routeSegmentPointer.setActive(true);map.getTargetElement().style.cursor='crosshair';document.getElementById('route-error').textContent='Drag near the middle of a segment, perpendicular to it. Escape cancels.';};
+
+var routeAssist=RouteAssist.mount({ol:ol,map:map,manual:drawRoute,settings:routeSettings,
+    context:()=>[currentGdsPath,currentLayoutHash],images:()=>microImages||[],features:()=>allFeatures.concat(drawSource.getFeatures()),
+    start:()=>{if(currentMode!=='route')setMode('route');},
+    commit:(points,spec)=>{
+        var f=new ol.Feature(new ol.geom.LineString(points));f.setProperties({route:spec,layer:spec.layer.join('/'),isDrawn:true,shapeType:'route',annotationId:crypto.randomUUID(),intent:JSON.parse(JSON.stringify(routeDraftIntent||currentIntent()))});
+        drawSource.addFeature(f);setMode('select');replaceSelection([f]);onSelectionChanged();persistAnnotations();showRouteProperties();
+        document.getElementById('route-error').textContent='Route saved. Clearance checked against layout and detected image obstacles at creation; edits require rechecking.';
+    }
+});
 
 
 document.getElementById('intent-action').addEventListener('change',function(){
@@ -1545,15 +1571,21 @@ var snapGrid = new ol.interaction.Snap({ source: gridSource, pixelTolerance: 10 
 snapGds.setActive(false);
 snapDraw.setActive(false);
 snapGrid.setActive(false);
-map.addInteraction(snapGds);
-map.addInteraction(snapDraw);
-map.addInteraction(snapGrid);
+
+// Inactive Snap interactions still index every source event. Detach them while
+// unused, and during document replacement, so old segment trees are cleared once.
+// Keep these last in the collection: snapping must run before drawing/modifying.
+function attachSnapInteractions(enabled) {
+    [snapGds, snapDraw, snapGrid].forEach(function(interaction) {
+        interaction.setActive(enabled);
+        if (enabled && !interaction.getMap()) map.addInteraction(interaction);
+        else if (!enabled && interaction.getMap()) map.removeInteraction(interaction);
+    });
+}
 
 function toggleSnap() {
     snapActive = !snapActive;
-    snapGds.setActive(snapActive);
-    snapDraw.setActive(snapActive);
-    snapGrid.setActive(snapActive);
+    attachSnapInteractions(snapActive);
 
     var btn = document.querySelector('.tool-btn[data-mode="snap"]');
     btn.classList.toggle('active', snapActive);
@@ -1778,83 +1810,91 @@ function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
     currentPythonFile = pythonFile || '';
     currentFilePath = gdsPath;
     currentMode2 = mode;
-    source.clear();
-    restoringAnnotations = true;
-    drawSource.clear();
-    selectedFeatures.clear();
-    portSource.clear();
-    portFeatureById.clear();
-    layoutPortRecords = PortOverlay.layoutPorts(geojson);
-    allFeatures = [];
-    layerColors = {};
-    featuresByLayer.clear();
+    attachSnapInteractions(false);
+    try {
+        // Snap has been detached above; fast clear cannot leave its old segments behind.
+        // The layout source has no per-feature removal consumers (drawings do).
+        source.clear(true);
+        restoringAnnotations = true;
+        drawSource.clear();
+        selectedFeatures.clear();
+        portSource.clear();
+        portFeatureById.clear();
+        layoutPortRecords = PortOverlay.layoutPorts(geojson);
+        allFeatures = [];
+        layerColors = {};
+        featuresByLayer.clear();
 
-    geojson.features.forEach(function(feature, index) {
-        var props = feature.properties || {};
-        var key = props.layer + '/' + props.data_type;
-        layerColors[key] = props.color;
-        var geom = gdsGeoJsonFmt.readGeometry(feature.geometry);
-        var f = new ol.Feature({ geometry: geom });
-        f.set('elementId', props.element_id || 'fixture-' + index);
-        f.set('layer', key);
-        f.set('color', props.color);
-        f.set('layerKey', key);
-        f.set('visible', true);
-        f.set('selected', false);
-        f.set('provenance', props.provenance || {});
-        f.set('meta', {
-            area_um2: props.area_um2,
-            vertex_count: props.vertex_count,
-            bbox: props.bbox || []
+        geojson.features.forEach(function(feature, index) {
+            var props = feature.properties || {};
+            var key = props.layer + '/' + props.data_type;
+            layerColors[key] = props.color;
+            var geom = gdsGeoJsonFmt.readGeometry(feature.geometry);
+            var f = new ol.Feature({ geometry: geom });
+            f.set('elementId', props.element_id || 'fixture-' + index);
+            f.set('layer', key);
+            f.set('color', props.color);
+            f.set('layerKey', key);
+            f.set('visible', true);
+            f.set('selected', false);
+            f.set('provenance', props.provenance || {});
+            f.set('meta', {
+                area_um2: props.area_um2,
+                vertex_count: props.vertex_count,
+                bbox: props.bbox || []
+            });
+            allFeatures.push(f);
+            var layerFeatures=featuresByLayer.get(key);
+            if(!layerFeatures){layerFeatures=[];featuresByLayer.set(key,layerFeatures);}
+            layerFeatures.push(f);
         });
-        allFeatures.push(f);
-        var layerFeatures=featuresByLayer.get(key);
-        if(!layerFeatures){layerFeatures=[];featuresByLayer.set(key,layerFeatures);}
-        layerFeatures.push(f);
-    });
-    source.addFeatures(allFeatures);
+        source.addFeatures(allFeatures);
 
-    // Recalculate map size before fitting — the map may have been
-    // created before the webview container had its final dimensions.
-    map.updateSize();
+        // Recalculate map size before fitting — the map may have been
+        // created before the webview container had its final dimensions.
+        map.updateSize();
 
-    if (allFeatures.length > 0 && isReload && prevCenter && prevZoom !== null) {
-        map.getView().setCenter(prevCenter);
-        map.getView().setZoom(prevZoom);
-    } else if (allFeatures.length > 0) {
-        var sz = map.getSize();
-        if (sz && sz[0] >= 10 && sz[1] >= 10) {
-            fitView();
-        } else {
-            _pendingFit = true;
+        if (allFeatures.length > 0 && isReload && prevCenter && prevZoom !== null) {
+            map.getView().setCenter(prevCenter);
+            map.getView().setZoom(prevZoom);
+        } else if (allFeatures.length > 0) {
+            var sz = map.getSize();
+            if (sz && sz[0] >= 10 && sz[1] >= 10) {
+                fitView();
+            } else {
+                _pendingFit = true;
+            }
+            // OpenLayers may not render features added while the canvas had
+            // zero dimensions (common when the webview panel first appears).
+            // Re-fit after the browser has painted the canvas.
+            setTimeout(function() {
+                map.updateSize();
+                if(microLayer)fitMicroImage();else fitView();
+            }, 200);
         }
-        // OpenLayers may not render features added while the canvas had
-        // zero dimensions (common when the webview panel first appears).
-        // Re-fit after the browser has painted the canvas.
-        setTimeout(function() {
-            map.updateSize();
-            if(microLayer)fitMicroImage();else fitView();
-        }, 200);
+
+        var invalidAnnotations = 0;
+        (annotations || []).forEach(function(annotation) {
+            try { drawSource.addFeature(featureFromSavedAnnotation(annotation)); } catch(e) { invalidAnnotations++; }
+        });
+
+        restoringAnnotations = false;
+        refreshPortOverlay();
+        var stale = drawSource.getFeatures().some(function(f){var i=f.get('intent');return i && i.snapshot && i.snapshot!==currentLayoutHash;});
+        document.getElementById('workflow-status').textContent = stale ? 'Layout changed: review annotation targets.' : (allFeatures.length ? allFeatures.length + ' elements. Select, draw, then copy.' : 'This layout contains no visible geometry.');
+        if (invalidAnnotations) document.getElementById('workflow-status').textContent += ' ' + invalidAnnotations + ' invalid annotation(s) could not be restored.';
+        if (currentPythonFile) {
+            vscode && vscode.postMessage({ type: 'viewerContext', pythonFile: currentPythonFile });
+        }
+
+        buildLegend();
+
+        // Update provenance indicator (must be after buildLegend which recreates it)
+        updateModeIndicator(mode);
+    } finally {
+        restoringAnnotations = false;
+        attachSnapInteractions(snapActive);
     }
-
-    var invalidAnnotations = 0;
-    (annotations || []).forEach(function(annotation) {
-        try { drawSource.addFeature(featureFromSavedAnnotation(annotation)); } catch(e) { invalidAnnotations++; }
-    });
-
-    restoringAnnotations = false;
-    refreshPortOverlay();
-    var stale = drawSource.getFeatures().some(function(f){var i=f.get('intent');return i && i.snapshot && i.snapshot!==currentLayoutHash;});
-    document.getElementById('workflow-status').textContent = stale ? 'Layout changed: review annotation targets.' : (allFeatures.length ? allFeatures.length + ' elements. Select, draw, then copy.' : 'This layout contains no visible geometry.');
-    if (invalidAnnotations) document.getElementById('workflow-status').textContent += ' ' + invalidAnnotations + ' invalid annotation(s) could not be restored.';
-    if (currentPythonFile) {
-        vscode && vscode.postMessage({ type: 'viewerContext', pythonFile: currentPythonFile });
-    }
-
-    buildLegend();
-
-    // Update provenance indicator (must be after buildLegend which recreates it)
-    updateModeIndicator(mode);
 }
 
 function updateModeIndicator(mode) {
@@ -1950,7 +1990,7 @@ function featureFromSavedAnnotation(annotation) {
     var feature = new ol.Feature({geometry:geom});
     feature.set('isDrawn',true); feature.set('annotationId',annotation.id);
     feature.set('shapeType',annotation.shapeType); feature.set('intent',annotation.intent); feature.set('selected',false);
-    if(annotation.route){if(!ManhattanRoute.validateSpec(annotation.route)||g.type!=='LineString'||!ManhattanRoute.validate(g.coordinates))throw Error('Invalid Manhattan route');feature.set('route',annotation.route);}
+    if(annotation.route){if(!ManhattanRoute.validateSpec(annotation.route)||g.type!=='LineString'||!ManhattanRoute.validate(g.coordinates,annotation.route.style))throw Error('Invalid Manhattan route');feature.set('route',annotation.route);}
     if(annotation.editRotation!==undefined)feature.set('editRotation',annotation.editRotation);
     if(annotation.factory)feature.set('factory',annotation.factory);
     if(annotation.layer!==undefined)feature.set('layer',annotation.layer);
@@ -2142,6 +2182,7 @@ window.addEventListener('message', function(event) {
             else if (window.parent !== window) window.parent.postMessage({ type: 'webviewReady' }, '*');
             break;
         case 'loadGds':
+            if(typeof routeAssist!=='undefined'&&routeAssist)routeAssist.reset();
             workOrdersLoading=false;
             cancelAlignment();
             if(message.layoutHash&&currentLayoutHash&&message.layoutHash!==currentLayoutHash&&microImg){
@@ -2361,6 +2402,7 @@ function round4(v) { return Math.round(v * 10000) / 10000; }
 /** Recreate the OL image layer from the current transform (rotation is baked
  *  into an offscreen canvas because ImageStatic is axis-aligned). */
 function renderMicroLayer(updateUi) {
+    if(typeof routeAssist!=='undefined'&&routeAssist)routeAssist.invalidate();
     if (!microImg) return;
     var rendered=MicroscopeOverlay.render(microImg.img,microImg);
     if (!microLayer || microLayer._rendered !== rendered) {

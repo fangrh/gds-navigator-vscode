@@ -118,11 +118,18 @@ async function main() {
     await page.screenshot({ path: path.join(out, 'desktop.png') });
     await page.click('#eda-layers-toggle'); const layerGrowth = await page.evaluate(() => ({ before: document.querySelector('#sidebar').getBoundingClientRect().width, map: document.querySelector('#map').getBoundingClientRect().width, collapsed: document.body.classList.contains('layers-collapsed') })); assert(layerGrowth.collapsed && layerGrowth.map >= 180, 'layers toggle did not grow the map');
     await page.click('#eda-reset'); assert.equal(await page.$eval('#sidebar', el => el.getBoundingClientRect().width > 0), true, 'reset did not restore layer panel');
-    for (const width of [800, 500]) {
+    for (const width of [800, 500, 400, 320]) {
       await page.setViewport({ width, height: 620 }); await page.click('#eda-dock-toggle');
       const compact = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, map: document.querySelector('#map').getBoundingClientRect().width, collapsed: document.body.classList.contains('dock-collapsed') }));
       assert(compact.collapsed && !compact.overflow && compact.map >= 180, `compact ${width}px layout overflow or map collapse`);
-      await page.click('#eda-dock-toggle'); await page.click('#eda-dock-close'); assert(await page.$eval('#eda-dock', el => getComputedStyle(el).display === 'none'));
+      await page.click('#eda-dock-toggle');
+      const reachable = await page.evaluate(() => {
+        const dock = document.querySelector('#eda-dock').getBoundingClientRect();
+        const close = document.querySelector('#eda-dock-close'); const r = close.getBoundingClientRect();
+        return { left: dock.left, right: dock.right, width: innerWidth, close: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === close };
+      });
+      assert(reachable.left >= 0 && reachable.right <= reachable.width && reachable.close, `compact ${width}px inspector is clipped: ${JSON.stringify(reachable)}`);
+      await page.click('#eda-dock-close'); assert(await page.$eval('#eda-dock', el => getComputedStyle(el).display === 'none'));
       await page.click('#eda-dock-toggle'); await page.click('#eda-tab-components'); await page.waitForFunction(() => !document.querySelector('#primitive-controls').hidden); await page.waitForSelector('#component-catalog input[type=search]');
       const scroll = await page.evaluate(() => { document.querySelector('#component-catalog').style.minHeight = '900px'; const n = document.querySelector('#eda-dock-content'); n.scrollTop = n.scrollHeight; return { tall: n.scrollHeight > n.clientHeight, moved: n.scrollTop > 0 }; });
       assert(scroll.tall && scroll.moved, `compact ${width}px inspector content did not scroll`); await page.click('#primitive-close');
@@ -130,7 +137,7 @@ async function main() {
     }
     await page.setViewport({ width: 1400, height: 900 }); await page.screenshot({ path: path.join(out, 'compact-final.png') });
     await page.evaluate(()=>{const s=document.documentElement.style;s.setProperty('--vscode-editor-background','#ffffff');s.setProperty('--vscode-sideBar-background','#f3f3f3');s.setProperty('--vscode-foreground','#222222');s.setProperty('--vscode-input-background','#ffffff');s.setProperty('--vscode-editorWidget-background','#ececec');s.setProperty('--vscode-descriptionForeground','#555555');}); await page.screenshot({path:path.join(out,'light-theme.png')}); assert.equal(await page.$eval('#intent-text',el=>getComputedStyle(el).color),'rgb(34, 34, 34)');
-    assert.deepEqual(errors, []); fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ status: 'passed', viewports: [1400, 800, 500], layersToggle: true, numericFocus: true, screenshots: ['desktop.png', 'compact-800.png', 'compact-500.png', 'light-theme.png'] }, null, 2)); console.log('EDA workbench browser reliability passed');
+    assert.deepEqual(errors, []); fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ status: 'passed', viewports: [1400, 800, 500, 400, 320], layersToggle: true, numericFocus: true, screenshots: ['desktop.png', 'compact-800.png', 'compact-500.png', 'compact-400.png', 'compact-320.png', 'light-theme.png'] }, null, 2)); console.log('EDA workbench browser reliability passed');
   } finally { await browser.close(); await new Promise(resolve => s.close(resolve)); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -21,6 +21,7 @@ const PROFILES = {
     ['components', 'npm', ['run', 'test:components']],
     ['alignment', 'npm', ['run', 'test:alignment']],
     ['ui', 'npm', ['run', 'test:ui']],
+    ['routing', 'npm', ['run', 'test:routing']],
     ['work-orders', 'npm', ['run', 'test:work-orders']],
     ['package', 'npm', ['run', 'package']],
   ],

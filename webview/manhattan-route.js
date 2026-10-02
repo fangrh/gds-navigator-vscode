@@ -21,24 +21,32 @@
         });
         return out;
     }
-    function orthogonalize(points, horizontalFirst) {
+    function orthogonalize(points, horizontalFirst, style) {
         if (!Array.isArray(points) || points.length < 2 || points.some(function (p) { return !point(p); })) throw new TypeError('Route points must be finite 2D points');
         horizontalFirst = horizontalFirst !== false;
         var out = [[points[0][0], points[0][1]]];
         for (var i = 1; i < points.length; i++) {
             var a = points[i - 1], b = points[i];
             if (a[0] === b[0] || a[1] === b[1]) out.push([b[0], b[1]]);
+            else if (style === 'octilinear') {
+                var dx=b[0]-a[0],dy=b[1]-a[1],d=Math.min(Math.abs(dx),Math.abs(dy));
+                var corner=horizontalFirst ? [b[0]-Math.sign(dx)*d,b[1]-Math.sign(dy)*d] : [a[0]+Math.sign(dx)*d,a[1]+Math.sign(dy)*d];
+                out.push(corner,[b[0],b[1]]);
+            }
             else if (horizontalFirst) { out.push([b[0], a[1]], [b[0], b[1]]); }
             else { out.push([a[0], b[1]], [b[0], b[1]]); }
         }
         return compact(out);
     }
-    function validate(points) {
+    function validate(points, style) {
         if (!Array.isArray(points) || points.length < 2) return false;
         for (var i = 0; i < points.length; i++) {
             if (!point(points[i])) return false;
             if (i && points[i][0] === points[i - 1][0] && points[i][1] === points[i - 1][1]) return false;
-            if (i && points[i][0] !== points[i - 1][0] && points[i][1] !== points[i - 1][1]) return false;
+            if (i && points[i][0] !== points[i - 1][0] && points[i][1] !== points[i - 1][1]) {
+                var dx=Math.abs(points[i][0]-points[i-1][0]),dy=Math.abs(points[i][1]-points[i-1][1]);
+                if(style!=='octilinear'||Math.abs(dx-dy)>1e-8*Math.max(1,dx,dy))return false;
+            }
         }
         return true;
     }
@@ -48,6 +56,14 @@
     }
     function validateSpec(spec) {
         return !!spec && typeof spec === 'object' && spec.version === 1 && typeof spec.horizontalFirst === 'boolean' && finite(spec.width) && spec.width > 0 &&
+            (spec.style===undefined||['manhattan','octilinear'].includes(spec.style)) &&
+            (spec.method===undefined||['manual','guided','auto'].includes(spec.method)) &&
+            (spec.clearance===undefined||(finite(spec.clearance)&&spec.clearance>=0)) &&
+            (spec.gridSize===undefined||(finite(spec.gridSize)&&spec.gridSize>0)) &&
+            (spec.avoidGds===undefined||typeof spec.avoidGds==='boolean') &&
+            (spec.avoidImages===undefined||typeof spec.avoidImages==='boolean') &&
+            (spec.imageThreshold===undefined||(Number.isInteger(spec.imageThreshold)&&spec.imageThreshold>=1&&spec.imageThreshold<=255)) &&
+            (spec.imageMode===undefined||['filled','contours'].includes(spec.imageMode)) &&
             Array.isArray(spec.layer) && spec.layer.length === 2 && spec.layer.every(function (n) { return Number.isInteger(n) && n >= 0 && n <= 65535; });
     }
     function moveSegment(points, index, offset) {

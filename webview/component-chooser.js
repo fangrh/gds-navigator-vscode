@@ -5,7 +5,7 @@
         if (!config || !config.container || typeof config.postMessage !== 'function') throw new Error('ComponentChooser requires container and postMessage');
         const container = config.container, post = config.postMessage, onInsert = typeof config.onInsert === 'function' ? config.onInsert : function () {};
         let requestSerial = 0, catalogRequest = null, previewRequest = null, previewKey = null;
-        let catalog = [], selected = null, preview = null, largePreview = null, placeWhenReady = false;
+        let catalog = [], selected = null, focusedItem = null, preview = null, largePreview = null, placeWhenReady = false, visibleMatches = [];
         const thumbnails = new Map(), visibleNames = new Set(); let thumbnailRequest = null, thumbnailTimer = null, thumbnailDeadline = null;
         const rows = new Map(), svgCache = new Map(), MAX_SVG_CACHE = 64; let emptyMessage = null;
         const onPlace = typeof config.onPlace === 'function' ? config.onPlace : onInsert;
@@ -15,7 +15,7 @@
         const status = el('div'); status.setAttribute('role', 'status');
         const search = document.createElement('input'); search.type = 'search'; search.placeholder = 'Search components'; search.setAttribute('aria-label', 'Search components');
         const category = document.createElement('select'); category.setAttribute('aria-label', 'Filter component category');
-        const list = el('div'); list.setAttribute('role', 'listbox');
+        const list = el('div'); list.setAttribute('role', 'listbox'); list.setAttribute('aria-label', 'Component choices');
         const detail = el('div');
         const settings = document.createElement('textarea'); settings.setAttribute('aria-label', 'Component settings JSON'); settings.rows = 5;
         const previewButton = button('Preview component'); previewButton.disabled = true;
@@ -83,15 +83,27 @@
             const matches = catalog.filter(item => (!wanted || categoryName(item) === wanted) && (!query || item.name.toLowerCase().includes(query) || String(item.description || '').toLowerCase().includes(query))).slice(0, 500);
             const wantedNames = new Set(matches.map(item => item.name));
             rows.forEach((entry, name) => { if (!wantedNames.has(name)) { if (observer) observer.unobserve(entry.row); visibleNames.delete(name); entry.row.remove(); rows.delete(name); } });
-            if (!matches.length) { list.textContent = ''; emptyMessage = el('div', catalog.length ? 'No matching components.' : 'No components loaded.'); emptyMessage.className = 'component-catalog-empty'; list.appendChild(emptyMessage); updateRetryControl(); return; }
+            visibleMatches = matches;
+            if (!matches.length) { focusedItem = null; list.textContent = ''; emptyMessage = el('div', catalog.length ? 'No matching components.' : 'No components loaded.'); emptyMessage.className = 'component-catalog-empty'; list.appendChild(emptyMessage); updateRetryControl(); return; }
+            if (!focusedItem || !wantedNames.has(focusedItem.name)) focusedItem = matches[0];
             if (emptyMessage) { list.textContent = ''; emptyMessage = null; }
             matches.forEach((item, index) => {
                 let entry = rows.get(item.name);
                 if (!entry) {
-                    const row = button(), thumb = el('span', 'Shape preview'); row.dataset.name=item.name; thumb.className = 'component-card-thumb'; row.className = 'component-card'; row.setAttribute('role', 'option'); row.addEventListener('click', () => select(item));
+                    const row = button(), thumb = el('span', 'Shape preview'); row.dataset.name=item.name; thumb.className = 'component-card-thumb'; row.className = 'component-card'; row.setAttribute('role', 'option'); row.addEventListener('click', () => { focusedItem = item; select(item); });
+                    row.addEventListener('keydown', event => {
+                        const index = visibleMatches.findIndex(candidate => candidate.name === item.name);
+                        let next = null;
+                        if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = visibleMatches[(index + 1) % visibleMatches.length];
+                        else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') next = visibleMatches[(index - 1 + visibleMatches.length) % visibleMatches.length];
+                        else if (event.key === 'Home') next = visibleMatches[0];
+                        else if (event.key === 'End') next = visibleMatches[visibleMatches.length - 1];
+                        else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); focusedItem = item; select(item); return; }
+                        if (next) { event.preventDefault(); event.stopPropagation(); focusedItem = next; updateFocus(); rows.get(next.name)?.row.focus(); }
+                    });
                     const name = el('span', item.name); name.className = 'component-card-name'; row.append(thumb, name); entry = { item, row, thumb }; rows.set(item.name, entry);
                 }
-                entry.item = item; item._thumbnail = entry.thumb; entry.row.title = item.description || item.name; entry.row.setAttribute('aria-selected', String(item === selected));
+                entry.item = item; item._thumbnail = entry.thumb; entry.row.title = item.description || item.name; entry.row.tabIndex = item === focusedItem ? 0 : -1; entry.row.setAttribute('aria-selected', String(item === selected));
                 const cached = cache.get(settingsKey(item, defaults(item))), icon = thumbnails.get(item.name);
                 if (cached) applyThumbnail(item, cached, entry.thumb); else if(icon&&icon.geojson)applyThumbnail(item,icon,entry.thumb); else if(icon&&icon.error){entry.thumb.textContent=(item.parameters||[]).some(p=>p.required)?'Settings required':'Preview unavailable';entry.thumb.title=icon.error;}
                 if (list.children[index] !== entry.row) { if (typeof list.insertBefore === 'function') list.insertBefore(entry.row, list.children[index] || null); else list.appendChild(entry.row); }
@@ -99,6 +111,7 @@
             });
             scheduleThumbnails(); updateRetryControl();
         }
+        function updateFocus() { rows.forEach(entry => { entry.row.tabIndex = entry.item === focusedItem ? 0 : -1; }); }
         function updateSelectedRow() { rows.forEach(entry => entry.row.setAttribute('aria-selected', String(entry.item === selected))); }
         function showLargePreview(result) { if (!largePreview) { largePreview = el('div'); detail.appendChild(largePreview); } largePreview.textContent = ''; largePreview.appendChild(geometrySvg(result.geojson, true)); }
         function requestPreview(item, parsed, automatic) {
@@ -106,11 +119,11 @@
             const requestId = String(++requestSerial); previewRequest = requestId; previewKey = key; preview = null; insertButton.hidden = true; message(automatic ? 'Loading geometry thumbnail…' : 'Building preview…'); post({ type: 'previewComponent', requestId, name: item.name, settings: parsed });
         }
         function select(item) {
-            selected = item; updateSelectedRow(); placeWhenReady=true; placeButton.hidden=true; previewRequest = null; previewKey = null; preview = null; previewButton.disabled = false; insertButton.hidden = true; const initial = defaults(item); settings.value = JSON.stringify(initial, null, 2); detail.textContent = ''; largePreview = null;
+            focusedItem = item; updateFocus(); selected = item; updateSelectedRow(); placeWhenReady=true; placeButton.hidden=true; previewRequest = null; previewKey = null; preview = null; previewButton.disabled = false; insertButton.hidden = true; const initial = defaults(item); settings.value = JSON.stringify(initial, null, 2); detail.textContent = ''; largePreview = null;
             detail.appendChild(el('h4', item.name)); largePreview=el('div'); detail.appendChild(largePreview); detail.appendChild(el('p', item.description || 'No documentation available.')); if (item.library) detail.appendChild(el('p', 'Project component · gds_components.py')); detail.appendChild(el('p', signature(item))); const labels = el('div'); (item.parameters || []).forEach(p => labels.appendChild(el('div', p.required ? `${p.name} (required)` : `${p.name}: ${Object.prototype.hasOwnProperty.call(p, 'default') ? JSON.stringify(p.default) : 'default unavailable'}`))); detail.appendChild(labels); detail.appendChild(settings); detail.appendChild(previewButton); detail.appendChild(placeButton); detail.appendChild(insertButton);
             const missing = (item.parameters || []).some(p => p.required && !Object.prototype.hasOwnProperty.call(initial, p.name)); if (missing) detail.appendChild(el('div', 'Enter required settings to load geometry.')); else requestPreview(item, initial, true);
         }
-        function open() { container.hidden = false; search.focus(); if (catalog.length) { renderList(); return; } const requestId = String(++requestSerial); catalogRequest = requestId; catalog = []; selected = null; preview = null; renderList(); message('Loading component catalog…'); post({ type: 'requestComponentCatalog', requestId }); }
+        function open() { container.hidden = false; search.focus(); if (catalog.length) { renderList(); return; } const requestId = String(++requestSerial); catalogRequest = requestId; catalog = []; selected = null; focusedItem = null; preview = null; renderList(); message('Loading component catalog…'); post({ type: 'requestComponentCatalog', requestId }); }
         previewButton.addEventListener('click', () => { if (!selected) return; let parsed; try { parsed = JSON.parse(settings.value || '{}'); } catch { message('Settings must be valid JSON.', true); return; } if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { message('Settings must be a JSON object.', true); return; } placeWhenReady=false;requestPreview(selected, parsed, false); });
         settings.addEventListener('input', () => { preview = null; placeWhenReady=false; placeButton.hidden=true; previewRequest = null; previewKey = null; insertButton.hidden = true; }); insertButton.addEventListener('click', () => { if (preview) onInsert(preview); }); search.addEventListener('input', renderList); category.addEventListener('change', renderList);
         function handleMessage(msg) {
@@ -127,7 +140,7 @@
         }
         function retryFailedThumbnails() { if (thumbnailRequest) return; const names = catalog.filter(item => thumbnails.get(item.name)?.error).map(item => item.name); if (!names.length) return; names.forEach(name => { thumbnails.delete(name); visibleNames.add(name); }); renderList(); updateRetryControl(); }
         retryFailed.addEventListener('click', retryFailedThumbnails);
-        function invalidateCache() { cache.clear();thumbnails.clear();svgCache.clear();visibleNames.clear();clearTimeout(thumbnailTimer);clearTimeout(thumbnailDeadline);thumbnailRequest=null;placeWhenReady=false;placeButton.hidden=true; catalog = []; catalogRequest = null; previewRequest = null; previewKey = null; selected = null; preview = null; previewButton.disabled=true; insertButton.hidden = true; retryFailed.hidden = true; retryFailed.disabled = true; detail.textContent = ''; largePreview = null; rows.forEach(entry => { if(observer) observer.unobserve(entry.row); entry.row.remove(); }); rows.clear(); renderList(); }
+        function invalidateCache() { cache.clear();thumbnails.clear();svgCache.clear();visibleNames.clear();clearTimeout(thumbnailTimer);clearTimeout(thumbnailDeadline);thumbnailRequest=null;placeWhenReady=false;placeButton.hidden=true; catalog = []; catalogRequest = null; previewRequest = null; previewKey = null; selected = null; focusedItem = null; preview = null; previewButton.disabled=true; insertButton.hidden = true; retryFailed.hidden = true; retryFailed.disabled = true; detail.textContent = ''; largePreview = null; rows.forEach(entry => { if(observer) observer.unobserve(entry.row); entry.row.remove(); }); rows.clear(); renderList(); }
         container.hidden = true; return { open, handleMessage, cancelPendingPlacement:()=>{placeWhenReady=false;}, invalidateCache };
     }
     root.ComponentChooser = { mount };

@@ -1,0 +1,6 @@
+#browser-host-toolbar{position:static;z-index:10;display:flex;flex:0 0 auto;gap:6px;align-items:center;flex-wrap:wrap;max-height:76px;overflow:auto;padding:5px 8px;background:#202331;color:#e2e5ef;border-bottom:1px solid #626780;font:12px sans-serif}
+#browser-host-toolbar button,#browser-host-toolbar select,#browser-host-toolbar label{font:inherit;color:#e2e5ef;background:#35394d;border:1px solid #626780;border-radius:4px;padding:4px 6px;min-width:0}
+#browser-host-toolbar select{flex:1 1 120px}#browser-host-toolbar input{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+#browser-host-toolbar label{cursor:pointer;white-space:nowrap}#browser-host-toolbar details{margin-left:auto;max-width:45vw}#browser-host-toolbar pre{max-height:180px;overflow:auto;white-space:pre-wrap}
+#browser-host-status{color:#a6e3a1;min-width:120px;overflow-wrap:anywhere}
+@media (max-width:420px){#browser-host-toolbar{max-height:110px;gap:3px;padding:3px 4px}#browser-host-toolbar details{margin-left:0;max-width:100%}#browser-host-status{min-width:0;flex:1 1 100%}}

@@ -7,6 +7,18 @@ GDS editor) into VS Code. The web app's Monaco editor, terminal and file tree
 are dropped; VS Code itself provides those. What remains is the layout viewer,
 the provenance navigation, the script runner and the image-registration tool.
 
+## Browser development (no VS Code required)
+
+Run `npm run dev:web` and open **http://127.0.0.1:4173**. This runs the actual
+plugin viewer and shared domain modules, with a local Node host for GDS parsing,
+editing persistence, images, component previews and work orders. No separate
+copy of the editor is maintained. Reload the page after changing viewer code.
+
+Use `npm run test:web` for real-browser checks and `npm run profile:web` for
+repeatable 1,000/10,000-feature load and pan/render measurements. Details,
+Python selection, debug storage and host differences are in
+[Browser development](docs/browser-development.md).
+
 ## Start a project
 
 Open a folder in VS Code and click the **GDS Navigator** icon in the Activity
@@ -383,7 +395,10 @@ Click a microscope image in an area without foreground geometry, then press **Ta
 **Revert proposal** restores annotation state only. **Revert source + proposal** is available for completed instructions with recorded source snapshots. The persisted status note records which rollback occurred.
 
 
-### Manhattan route drafts
+### Manhattan, guided and automatic routes
+
+Choose manual waypoints, a drawn reference guide, or automatic routing between two endpoints. Automatic/guided routes avoid loaded GDS geometry and detected contours from visible microscope images, using trace width plus clearance. Review the obstacle mask and green preview before selecting **Use route**. Manhattan and electrical 45° styles are available. [Routing workflow and limits](docs/obstacle-routing.md).
+
 
 Click **Route** in the right toolbar (or press **6**), then click waypoints. Each connection uses horizontal/vertical segments; choose the initial bend order in the route panel. Press **Enter**, double-click, or use **Finish route** to finish; **Escape** cancels.
 

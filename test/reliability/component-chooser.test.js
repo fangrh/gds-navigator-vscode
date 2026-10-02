@@ -3,9 +3,9 @@ const fs = require('fs');
 const vm = require('vm');
 
 function node(tag) {
-  return { focus() {}, remove() {}, tag, children: [], textContent: '', value: '', hidden: false, disabled: false, dataset: {}, style: {}, listeners: {}, append(...xs) { this.children.push(...xs); }, appendChild(x) { this.children.push(x); return x; }, setAttribute(k, v) { this[k] = v; }, addEventListener(k, fn) { this.listeners[k] = fn; }, click() { this.listeners.click?.({}); } };
+  return { focus() { document.activeElement = this; }, remove() {}, tag, children: [], textContent: '', value: '', hidden: false, disabled: false, dataset: {}, style: {}, listeners: {}, append(...xs) { this.children.push(...xs); }, appendChild(x) { this.children.push(x); return x; }, setAttribute(k, v) { this[k] = v; }, addEventListener(k, fn) { this.listeners[k] = fn; }, click() { this.listeners.click?.({}); } };
 }
-const document = { createElement: node, createElementNS: (_ns, tag) => node(tag) };
+const document = { activeElement: null, createElement: node, createElementNS: (_ns, tag) => node(tag) };
 const root = { document, setTimeout: (fn, ms) => { if (ms === 40) fn(); return 1; }, clearTimeout() {} };
 vm.runInNewContext(fs.readFileSync(require('path').join(__dirname, '../../webview/component-chooser.js'), 'utf8'), root);
 const container = node('section'); const messages = []; const inserted = [];
@@ -16,7 +16,11 @@ chooser.handleMessage({ type: 'componentCatalog', requestId: catalogId, result: 
 assert(container.children.length > 0, 'chooser did not render catalog');
 const shell = container.children[0]; const list = shell.children[3]; const categoryFilter = shell.children[0].children[1]; assert.equal(categoryFilter.children[0].value, '', 'all category filter is not selectable'); const cards = list.children.filter(x => x.tag === 'button'); assert.match(cards[0].children[1].textContent, /^bend/, 'catalog is not alphabetical');
 const thumbnailRequest = messages.find(m => m.type === 'requestComponentThumbnails'); assert(thumbnailRequest, 'thumbnail request missing'); chooser.handleMessage({ type: 'componentError', requestId: thumbnailRequest.requestId, error: 'temporary failure' }); const retry = shell.children[0].children.find(x => x.textContent === 'Retry failed shapes'); assert.equal(retry.hidden, false, 'retry control did not appear'); retry.click(); const retryRequest = messages.at(-1); assert.equal(retryRequest.type, 'requestComponentThumbnails'); assert.notEqual(retryRequest.requestId, thumbnailRequest.requestId); assert.equal(chooser.handleMessage({ type: 'componentThumbnails', requestId: thumbnailRequest.requestId, result: { items: [] } }), false, 'stale thumbnail response was accepted'); chooser.handleMessage({ type: 'componentThumbnails', requestId: retryRequest.requestId, result: { items: [{ name: 'bend', geojson: { type: 'FeatureCollection', features: [] } }, { name: 'straight', geojson: { type: 'FeatureCollection', features: [] } }] } }); assert.equal(retry.hidden, true, 'retry control remained visible after recovery');
-cards[0].click();
+assert.equal(list['aria-label'], 'Component choices', 'component listbox is not labelled'); assert.equal(cards[0].tabIndex, 0, 'first component should be the roving tab stop'); assert.equal(cards[1].tabIndex, -1, 'only one component should be tabbable');
+const key = (card, keyName) => { let prevented = false, stopped = false; card.listeners.keydown({ key: keyName, preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } }); return { prevented, stopped }; };
+let result = key(cards[0], 'ArrowDown'); assert(result.prevented && result.stopped, 'ArrowDown did not consume component navigation'); assert.equal(document.activeElement, cards[1], 'ArrowDown did not move focus to the next component'); assert.equal(cards[0].tabIndex, -1); assert.equal(cards[1].tabIndex, 0); assert.equal(messages.filter(m => m.type === 'previewComponent').length, 0, 'arrow navigation triggered preview');
+result = key(cards[1], 'Home'); assert(result.prevented && result.stopped, 'Home did not consume component navigation'); assert.equal(document.activeElement, cards[0]); result = key(cards[0], 'Enter'); assert(result.prevented && result.stopped, 'Enter did not consume component selection'); assert.equal(messages.at(-1).type, 'previewComponent', 'Enter did not trigger selection preview');
+cards[0].click(); assert.equal(cards[0].tabIndex, 0, 'click selection did not move the roving tab stop'); assert.equal(cards[1].tabIndex, -1);
 assert.equal(messages.at(-1).type, 'previewComponent', 'defaultable factory was not previewed automatically');
 const automaticId = messages.at(-1).requestId;
 chooser.handleMessage({ type: 'componentPreview', requestId: automaticId, result: { name: 'bend', settings: {}, geojson: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[0, 0], [4, 0], [4, 1], [0, 0]]] } }] } } });

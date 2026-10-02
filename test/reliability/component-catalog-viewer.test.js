@@ -24,6 +24,16 @@ async function main() {
     const catalogRequest = await page.evaluate(() => window.__sent.filter(m => m.type === 'requestComponentCatalog').at(-1)); assert(catalogRequest, 'catalog request missing');
     await page.evaluate(id => window.dispatchEvent(new MessageEvent('message', { data: { type: 'componentCatalog', requestId: id, result: { components: [{ name: 'zeta', category: 'Other', parameters: [{ name: 'width', required: true }] }, { name: 'alpha', category: 'Basic', parameters: [] }] } } })), catalogRequest.requestId);
     await page.waitForSelector('#component-catalog [role=option].component-card'); await page.waitForFunction(() => document.querySelector('#component-catalog .component-card-name')?.textContent === 'alpha');
+    await page.focus('#component-catalog [role=option].component-card'); await page.keyboard.press('ArrowDown');
+    assert.equal(await page.evaluate(() => document.activeElement.textContent.includes('zeta')), true, 'ArrowDown did not move component focus');
+    assert.equal(await page.evaluate(() => document.querySelector('.component-card[aria-selected="true"]')), null, 'arrow navigation changed selection');
+    assert.equal(await page.evaluate(() => __sent.filter(m => m.type === 'previewComponent').length), 0, 'arrow navigation triggered preview');
+    await page.keyboard.press('Home'); await page.keyboard.press('Enter');
+    await page.waitForFunction(() => __sent.some(m => m.type === 'previewComponent'));
+    await page.$eval('#component-catalog input[type=search]', (input) => { input.value = 'alpha'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.focus('#component-catalog [role=option].component-card'); await page.keyboard.press('ArrowDown');
+    assert.equal(await page.evaluate(() => document.activeElement.textContent.includes('alpha')), true, 'filtered ArrowDown escaped the visible component set');
+    await page.$eval('#component-catalog input[type=search]', (input) => { input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); });
     await page.waitForFunction(()=>__sent.some(m=>m.type==='requestComponentThumbnails'));
     const thumbRequest=await page.evaluate(()=>__sent.find(m=>m.type==='requestComponentThumbnails'));
     await page.evaluate(({id,result})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentThumbnails',requestId:id,result:{items:[result,{name:'zeta',error:'width required'}]}}})),{id:thumbRequest.requestId,result:PREVIEW});
@@ -40,7 +50,7 @@ async function main() {
     await page.waitForFunction(()=>document.querySelectorAll('#component-catalog .component-card-thumb svg').length===2);
     assert.equal(await page.$eval('#component-catalog button[aria-label="Retry failed component shape thumbnails"]',b=>b.hidden),true,'retry control remained visible after recovery');
     assert.deepEqual(await page.evaluate(()=>({drawn:drawSource.getFeatures().length,selected:selectedFeatures.getLength()})),{drawn:0,selected:0},'thumbnail retry entered placement or selection');
-    assert.equal(await page.evaluate(()=>__sent.filter(m=>m.type==='previewComponent').length),0,'icon loading required selection');
+    assert.equal(await page.evaluate(()=>__sent.filter(m=>m.type==='previewComponent').length),1,'keyboard Enter did not produce the single intentional preview');
     await page.screenshot({path:path.join(out,'catalog.png')});
     await page.click('#component-catalog .component-card');
     const previewRequest=await page.evaluate(()=>__sent.filter(m=>m.type==='previewComponent').at(-1));
@@ -69,7 +79,7 @@ async function main() {
     assert.equal(order.components.length,3);assert(order.components.every(c=>c.factory.name==='alpha'&&c.geometry.type==='Polygon'));
     await page.evaluate(()=>{pendingWorkOrder=null;document.getElementById('queue-instruction').disabled=false;shapeProperties.hide();});
     await page.click('#shape-menu-btn');await page.click('#component-catalog .component-card');
-    await page.waitForFunction(()=>!!factoryDraft);assert.equal(await page.evaluate(()=>__sent.filter(m=>m.type==='previewComponent').length),1,'cache missed');
+    await page.waitForFunction(()=>!!factoryDraft);assert.equal(await page.evaluate(()=>__sent.filter(m=>m.type==='previewComponent').length),2,'cache missed');
     await page.evaluate(()=>map.dispatchEvent({type:'pointermove',coordinate:[42,17],pixel:[0,0],originalEvent:{}}));
     await page.keyboard.press('Escape');await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));assert.equal(await page.evaluate(()=>factoryDraft),null);
     assert.equal(await page.evaluate(()=>drawSource.getFeatures().length),3,'cancel inserted another component');

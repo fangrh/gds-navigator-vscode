@@ -107,6 +107,9 @@ body.dock-collapsed #eda-dock { display: none !important; }
 #image-controls :is(button, select, input[type="text"]) { padding: 4px 6px; }
 #route-controls label, #primitive-controls label { display: flex; align-items: center; justify-content: space-between; gap: 7px; margin: 7px 0; }
 #route-controls :is(input, select) { width: 135px; max-width: 55%; }
+#route-controls input[type="checkbox"] { width: auto; max-width: none; flex: 0 0 auto; }
+#route-assist-controls { border-top: 1px solid var(--eda-border); margin-top: 8px; padding-top: 4px; }
+#route-assist-controls label:has(input[type="checkbox"]) { justify-content: flex-start; }
 #route-controls textarea { width: 100%; max-height: 120px; resize: vertical; }
 #primitive-controls :is(input, select) { width: 125px; max-width: 55%; }
 #instruction-list article { padding: 8px 0; border-top: 1px solid var(--eda-border); }
@@ -144,6 +147,18 @@ body.dock-collapsed #eda-dock { display: none !important; }
   #instruction-bar textarea { flex-basis: 100%; order: 2; }
   #instruction-bar #queue-instruction { order: 3; }
   #instruction-bar #copy-open-instructions, #instruction-bar #intent-apply { order: 4; }
+}
+
+/* Stack panels when a split editor cannot fit the canvas and inspector side by side. */
+@media (max-width: 480px) {
+  #eda-header { flex-wrap: wrap; }
+  #eda-document { max-width: 100%; flex: 1 1 100%; }
+  #eda-header nav { flex: 1 1 100%; }
+  #eda-body { flex-direction: column; }
+  #sidebar { flex: 0 1 30%; width: 100%; border-right: 0; border-bottom: 1px solid var(--eda-border); }
+  body.layers-collapsed #sidebar { display: none; }
+  #map-container { min-height: 100px; }
+  #eda-dock { flex: 0 1 55%; width: 100%; border-left: 0; border-top: 1px solid var(--eda-border); }
 }
 
 /* Keep text entry useful when the canvas is narrow, instead of shrinking to a sliver. */

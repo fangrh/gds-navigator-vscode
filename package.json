@@ -156,6 +156,10 @@
     }
   },
   "scripts": {
+    "dev:web": "npm run build:webview && node scripts/serve-web.cjs",
+    "test:web": "npm run build:webview && node test/reliability/browser-host.test.js && node test/reliability/browser-host-viewer.test.js && node test/reliability/snap-lifecycle.test.js",
+    "profile:web": "npm run build:webview && node scripts/profile-web.cjs",
+    "profile:web:compare": "npm run build:webview && node scripts/compare-web-performance.cjs",
     "project:check": "node scripts/verify-project.cjs check",
     "project:verify": "node scripts/verify-project.cjs run",
     "project:status": "node scripts/verify-project.cjs status",
@@ -189,6 +193,7 @@
     "test:primitives:vscode": "npm run compile && node test/reliability/demo-provenance.test.js && node test/reliability/vscode-lifecycle.test.js --primitives",
     "test:usage": "node test/reliability/usage-log.test.js && node test/reliability/usage-report.test.js && node test/reliability/usage-events.test.js && node test/reliability/usage-provider.test.js && node test/reliability/automatic-usage-report.test.js",
     "test:usage:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js --usage",
+    "test:routing": "node test/reliability/manhattan-route.test.js && node test/reliability/manhattan-route-export.test.js && node test/reliability/route-planner.test.js && node test/reliability/route-image-mask.test.js && node test/reliability/route-export.test.js && node test/reliability/manhattan-route-viewer.test.js && node test/reliability/route-assist-viewer.test.js",
     "test:ui": "node test/reliability/eda-workbench.test.js && node test/reliability/component-catalog-viewer.test.js && node test/reliability/shape-properties-viewer.test.js && node test/reliability/manhattan-route-viewer.test.js && node test/reliability/context-menu.test.js && node test/reliability/review-tools-viewer.test.js",
     "test:review": "node test/reliability/layout-review.test.js && node test/reliability/review-store.test.js && node test/reliability/review-provider.test.js && node test/reliability/review-tools-viewer.test.js",
     "test:environment": "node test/reliability/python-environment-manager.test.js && node test/reliability/python-environment.test.js && node test/reliability/project-environment.test.js && node test/reliability/handoff-runtime.test.js",

@@ -1320,7 +1320,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
             .replace('__WORKER_SOURCE__', `<script>window.numberedMarkerWorkerSource=${JSON.stringify(workerSource).replace(/</g, '\\u003c')};</script>`)
             .replace('__MARKER_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'numbered-marker-alignment.js'))}"></script>`)
             .replace('__OVERLAY_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'microscope-overlay.js'))}"></script>`)
-            .replace('__ROUTE_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'manhattan-route.js'))}"></script>`)
+            .replace('__ROUTE_JS__', ['manhattan-route.js','route-planner.js','route-image-mask.js','route-assist.js'].map(file => `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', file))}"></script>`).join('') + `<script>window.routePlannerWorkerSource=${JSON.stringify(fs.readFileSync(path.join(this.context.extensionUri.fsPath, 'webview', 'route-planner.js'),'utf8')).replace(/</g, '\\u003c')};</script>`)
             .replace('__PROPERTIES_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'shape-properties.js'))}"></script>`)
             .replace('__CHOOSER_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'component-chooser.js'))}"></script>`)
             .replace('__PRIMITIVE_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'layout-primitives.js'))}"></script>`)

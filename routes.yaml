@@ -152,3 +152,63 @@ routes:
   notes: 先用 backlog bind 绑定会话和原生任务；matrix query/diagnose 用 --backlog-session 留存决策；oplog
     自动填充 task_id；用 backlog finalize 校验后完成。Backlog Done 不代表科学验收；旧 exploration 与 claim
     graph 保留为历史或证据；CLI 指令与验证检查不是操作系统隔离。
+- id: route-optional-exploration
+  problem: Optional idea exploration or a coarse full-pipeline run to discover issues
+    without strict main-delivery checking.
+  solution: Use using-triz/references/exploratory-branches.md and tree explore; follow
+    issues in exploratory children, relax delivery fidelity, retain reference findings,
+    and continue actionable authorized steps until the question is answered or an
+    evidenced bottleneck prevents useful progress. Agent-chosen budgets trigger reassessment,
+    not automatic termination. Promote useful fixes into normal delivery branches
+    for acceptance.
+  skill: research-fast
+  source: repo
+  notes: Optional branches do not block delivery or count toward persistence; explicit
+    resource limits and Julia default remain.
+- id: route-skill-matrix-development
+  problem: 在 research-triz 技能源仓库根目录明确改进技能/矩阵，或完成普通科研后需要用新证据反馈任务路由矩阵和其他适用矩阵。
+  solution: 明确开发任务以 matrix_development 为主路线，按 using-triz/references/develop-mode.md
+    冻结覆盖问题与预算并选择原文审查或有界复现；普通根目录科研保持其科学主路线，在结果记录后、会话收尾前用已有来源和结果做短预算矩阵反馈。必查任务路由矩阵，仅查实际适用的其他矩阵；证据已覆盖则记录
+    no change，确认的缺口才最小更新活路由/技能矩阵，受保护科学目录仅形成未批准提案。
+  skill: research-router
+  source: repo
+  notes: 必须位于技能源码根目录；普通科研只追加有界反馈而不改变主目标，安装副本与非科研根目录任务不触发；不能把搜索命中、代码通过或 Backlog Done
+    当成科学验收。
+- id: route-research-task-methodology
+  problem: 研究任务开始时需要按目标类型选择逐步方法，或某一步出现具体障碍，需要据问题证据精确重路由。
+  solution: 框架先行：先看 research-router/references/research-task-routing-matrix.yaml 的任务类型
+    ID 与 choose_when，再读选中的完整行；科研任务再按 discipline-matrix.yaml 从控制机理与观测量选主学科，只在交叉接口影响决策时加入第二学科，读取其知识矩阵中的相关元素。学科知识不替代任务步骤和科学证据门。只有触发事实会改变下一步或证据门时才读取其他矩阵元素。重大歧义或用户要求独立选择时，用只读
+    route-scout 子代理返回简短路线卡，主控核对 ID、近邻排除和声明门；清楚任务直接路由。按当前交付决定主任务类型、首个判别器、目标成功门和停止条件，写入
+    route v0 后再实施；复杂目标只建必要子问题。仅当障碍阻挡目标门时保留 v0 并按 issue_refinement 建有界分支，结果返回父框架；目标门通过后报告并停止。
+  skill: research-router
+  source: repo
+  notes: 主任务类型、学科及其交叉接口、工件类别、声明强度是不同轴；跨学科路线须指出实际连接量或方法映射，不能由共享词汇触发；问题分支不得静默改写父目标，执行修复不等于科学验收。
+- id: route-concept-framing
+  problem: 新研究概念首次讨论或目标被实质重构，用户含义、远景目标、系统边界、观测量或交付结果尚未明确。
+  solution: 先用 concept-matrix 从用户原话和已有记录填格，分批追问关键未知或矛盾格；回述系统/有益功能与有害效果、真实矛盾及 IFR，并给用户纠正核心理解的机会。将概念摘要交给
+    Backlog 原生任务及后续 research-fast 或 deliverable-contract，避免重复问已知信息。
+  skill: concept-matrix
+  source: repo
+  notes: 只对新概念或实质 pivot 触发；清楚的续作和单一事实问答不重新访谈。私人探索允许 unknown 与短 brief；正式验收另走契约和科学门。
+- id: route-literature-corpus
+  problem: 多文献调研的直接交付是可核查的来源地图或筛选书目，而不是复现某篇论文的定量结果。
+  solution: 先冻结主题、数量、既有排除集与阅读深度；保存检索式和候选集，按 DOI、预印本版本和规范化标题去重，抽样核查原始论文页面；分别报告元数据筛选数、原文核查数和复现数，关键词命中不得升级为原文已读。按
+    research-router/references/reference-search.md 使用 references search/rank 脚本：本地
+    BM25 缩小候选，Laya 单次加载逐篇筛选并缓存，Jev 仅显式选择；缺摘要、超预算与不确定项保留，不启动重复的大型队列。
+  skill: research-router
+  source: repo
+  notes: 大规模文献表的数量门只证明筛选覆盖；后续单篇结果或加速比须另走 published_reproduction 和科学证据门。
+- id: route-published-claim-reproduction
+  problem: 从论文摘要出发复现定量声明，必须在首个廉价计算前确定文献版本、样本、输入与比较量的证据来源及可支持的声明强度。
+  solution: 用 research-fast 冻结可证伪首门和输入/比较量谱系，再按 scientific-tdd 的 Deliver Gates Matrix
+    选择证据强度；同一论文汇总数值的自洽通过只报 internal consistency，独立重建曲线或计算须另设门。
+  skill: research-fast
+  source: repo
+  notes: 对已有清楚任务不重启概念访谈；保留失败与版本差异，原始数据不可得时交付有界 provisional 或 negative 并留 revisit trigger。
+- id: route-process-bottleneck
+  problem: 操作日志出现混合耗时、重复手工步骤或宿主命令启动失败，需要提高研究流程效率。
+  solution: 查 operation-log/references/process-matrix.yaml，按事实槽位选过程规则；先用 ARIZ 声明矛盾、IFR
+    与分离，再执行有界比较。混合耗时先补分段计时，等价重复才抽象，启动错误只修启动器；零匹配或多匹配先分解并记录缺口。
+  skill: operation-log
+  source: repo
+  notes: 只路由过程，不替代 scientific-tdd 科学验收；同一问题可同时走科学门。证据不足时标 unknown，不推断求解器耗时或整体加速。

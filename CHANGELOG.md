@@ -3,6 +3,23 @@
 All notable changes to this project are documented in this file.
 Format based on Keep a Changelog; versioning: SemVer.
 
+## Unreleased
+
+### Added
+- Local browser development host using the same editor and domain modules as
+  the extension, with persistent debug sessions, browser tests and profiling.
+- Guided and automatic routing around GDS and detected image obstacles, with
+  adjustable clearance, mask previews, cancellation and explicit failure states.
+- Electrical 45° route style and manual waypoint backtracking.
+
+### Fixed
+- Shared editor loads avoid maintaining snap indexes while snapping is off;
+  document replacement clears old indexes in bulk and restores active snapping.
+- Component catalog keyboard navigation with arrow keys, Home/End, and
+  Enter/Space activation, including filtered results.
+- Inspector and header layout in narrow split editors down to 320 px.
+
+
 ## [0.1.0] - 2026-09-14
 
 First working release.

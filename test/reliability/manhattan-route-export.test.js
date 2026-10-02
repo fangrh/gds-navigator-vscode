@@ -22,7 +22,7 @@ const doc = selectionDocument('route.gds', 'hash-route', [{ ...annotation, provI
 const exported = doc.annotations[0];
 assert.deepEqual(exported.route, route);
 assert.deepEqual(exported.geometry, line);
-assert.deepEqual(exported.route_convention, { geometry: 'Manhattan centerline', units: 'um', width: 'full trace width', corners: 'sharp draft bends; no bend radius or port attachment inferred', validation: 'orthogonality only; no connectivity or design-rule check' });
+assert.deepEqual(exported.route_convention, { geometry: 'Manhattan centerline', units: 'um', width: 'full trace width', corners: 'centerline bends with round stroke joins for clearance; no photonic bend radius or port attachment inferred', validation: 'angle constraints only on export; automatic clearance check is against the detected obstacles at planning time, not a fabrication or connectivity check' });
 assert.equal(doc.handoff.status, 'context_complete');
 const bad = selectionDocument('route.gds', 'hash-route', [{ ...annotation, provId: 'bad', drawn: true, route: { ...route, width: -2 } }], 'TOP');
 assert.equal(bad.annotations[0].target_status, 'invalid_route');
