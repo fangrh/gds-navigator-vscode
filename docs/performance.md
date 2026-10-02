@@ -1,5 +1,16 @@
 # Editor performance checks
 
+For the measured Rust/Wasm autorouting change, see
+[Rust routing performance](rust-routing-performance.md). Its comparison measures
+route planning and worker latency separately from editor loading and rendering.
+
+The next [shared editor optimization](shared-editor-performance.md) measures
+loading, image rendering and repeated style/port/image-control work, including
+the rejected Rust image experiment and exact parity checks.
+
+[Source/component reuse](selection-component-performance.md) covers lazy source
+lookups, built-in catalog reuse and cancellation-safe concurrent requests.
+
 Run `npm run test:performance` for deterministic operation-count checks. Reports
 are written to `logs/performance/`. These checks establish reduced repeated work,
 not a universal frame-rate or end-to-end latency improvement.

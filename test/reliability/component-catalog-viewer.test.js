@@ -96,6 +96,7 @@ async function main() {
     await page.waitForSelector('#component-catalog [aria-label="Refresh component library"]', { visible:true });
     await page.click('#component-catalog [aria-label="Refresh component library"]');
     const freshRequest = await page.evaluate(()=>__sent.filter(m=>m.type==='requestComponentCatalog').at(-1));
+    assert.equal(freshRequest.refresh, true, 'Refresh did not bypass host catalog reuse');
     await page.evaluate(({id,result})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentCatalog',requestId:id,result}})), { id: freshRequest.requestId, result: call(['--catalog']) });
     await page.select('#component-catalog select', 'Project components');
     await page.waitForFunction(()=>document.querySelector('#component-catalog .component-card-name')?.textContent==='project:electrical_strip');
@@ -126,6 +127,7 @@ async function main() {
     assert.equal(await page.evaluate(()=>factoryDraft), null);
     fs.appendFileSync(path.join(projectRoot, 'gds_components.py'), '\nCOMPONENTS["new_strip"] = electrical_strip\n');
     const updatedRequest = await page.evaluate(()=>__sent.filter(m=>m.type==='requestComponentCatalog').at(-1));
+    assert.equal(updatedRequest.refresh, true);
     await page.evaluate(({id,result})=>window.dispatchEvent(new MessageEvent('message',{data:{type:'componentCatalog',requestId:id,result}})), { id: updatedRequest.requestId, result: call(['--catalog']) });
     await page.select('#component-catalog select', 'Project components');
     await page.waitForFunction(()=>document.querySelectorAll('#component-catalog .component-card').length===2);

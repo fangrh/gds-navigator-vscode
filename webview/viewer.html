@@ -12,6 +12,7 @@ __PRIMITIVE_JS__
 __PORT_JS__
 __CHOOSER_JS__
 __PROPERTIES_JS__
+__SOURCE_SELECTION_JS__
 __ROUTE_JS__
 __USAGE_JS__
 __EDA_JS__
@@ -373,12 +374,24 @@ var drawStyleSelected = new ol.style.Style({
 // Style callbacks run on every render frame. Keep the small, immutable style
 // variants bounded so pan/zoom does not recreate the same OpenLayers objects.
 function boundedStyleCache(limit) {
-    var entries = new Map();
-    return function(key, create) {
-        if (entries.has(key)) return entries.get(key);
-        var value = create();
-        entries.set(key, value);
-        if (entries.size > limit) entries.delete(entries.keys().next().value);
+    // Cache primitive tuples directly. No per-feature records or serialized
+    // keys are retained, and evictions prune unused branches.
+    var root={children:new Map()},order=[];
+    function remove(node,parts,depth){
+        var child=node.children.get(parts[depth]);
+        if(depth===parts.length-1)delete child.value;else remove(child,parts,depth+1);
+        if(child.value===undefined&&!child.children.size)node.children.delete(parts[depth]);
+    }
+    return function(parts,create){
+        var node=root;
+        for(var i=0;i<parts.length;i++){
+            var child=node.children.get(parts[i]);
+            if(!child){child={children:new Map()};node.children.set(parts[i],child);}
+            node=child;
+        }
+        if(node.value!==undefined)return node.value;
+        var value=create();node.value=value;order.push(parts.slice());
+        if(order.length>limit)remove(root,order.shift(),0);
         return value;
     };
 }
@@ -388,7 +401,7 @@ var routeStyleCache = boundedStyleCache(96);
 var drawLayer = new ol.layer.Vector({
     source: drawSource,
     style: function(feature, resolution) {
-        if(feature.get('route')){var spec=feature.get('route'),selected=feature.get('selected');return routeStyleCache(JSON.stringify([selected, spec.width, resolution]), function(){return [
+        if(feature.get('route')){var spec=feature.get('route'),selected=feature.get('selected');return routeStyleCache(['route', selected, spec.width, resolution], function(){return [
             new ol.style.Style({stroke:new ol.style.Stroke({color:selected?'rgba(137,180,250,.4)':'rgba(243,139,168,.3)',width:Math.max(1,Math.min(2048,spec.width/resolution)),lineCap:'butt',lineJoin:'round'})}),
             new ol.style.Style({stroke:new ol.style.Stroke({color:selected?'#ffffff':'#f38ba8',width:2,lineDash:[6,4],lineCap:'butt',lineJoin:'miter'})})];});}
         return feature.get('selected') ? drawStyleSelected : drawStyleDefault;
@@ -403,7 +416,7 @@ var portLayer = new ol.layer.Vector({
     visible: portsVisible,
     style: function(feature) {
         var port = feature.get('port'), selected = !!feature.get('selected');
-        return portStyleCache(JSON.stringify([selected, portNamesVisible ? port.name : '']), function() {
+        return portStyleCache(['port', selected, portNamesVisible ? port.name : ''], function() {
             return new ol.style.Style({
                 image: new ol.style.Circle({radius: selected ? 8 : 6,
                     fill: new ol.style.Fill({color: selected ? '#ffffff' : '#f9e2af'}),
@@ -423,7 +436,11 @@ function refreshPortOverlay() {
         if (!Array.isArray(port.center) || !port.center.every(Number.isFinite) || nextIds.has(port.id)) return;
         nextIds.add(port.id);
         var feature = portFeatureById.get(port.id);
-        if (feature) { feature.getGeometry().setCoordinates(port.center); feature.set('port', port); }
+        if (feature) {
+            var oldCenter = feature.getGeometry().getCoordinates();
+            if (oldCenter[0] !== port.center[0] || oldCenter[1] !== port.center[1]) feature.getGeometry().setCoordinates(port.center);
+            if (feature.get('port') !== port) feature.set('port', port);
+        }
         else {
             feature = new ol.Feature({geometry:new ol.geom.Point(port.center)});
             feature.set('elementId', port.id);
@@ -436,9 +453,10 @@ function refreshPortOverlay() {
         }
     });
     var removedSelected = false;
+    var selectedPortFeatures = new Set(selectedFeatures.getArray());
     for (var [id, feature] of portFeatureById) {
         if (nextIds.has(id)) continue;
-        if (selectedFeatures.getArray().includes(feature)) { selectedFeatures.remove(feature); removedSelected = true; }
+        if (selectedPortFeatures.has(feature)) { selectedFeatures.remove(feature); removedSelected = true; }
         portSource.removeFeature(feature);
         portFeatureById.delete(id);
     }
@@ -561,6 +579,11 @@ document.addEventListener('keyup', function(e) {
 // ============================================================
 // Selection management
 // ============================================================
+var sourceSelectionLookup=null;
+function selectionLookup(){
+    if(!sourceSelectionLookup)sourceSelectionLookup=SourceSelection.create(allFeatures);
+    return sourceSelectionLookup;
+}
 function addToSelection(features) {
     features=expandFactorySelection(features).filter(function(f){return f.get('visible')!==false;});
     var selectedSet=new Set(selectedFeatures.getArray());
@@ -664,11 +687,7 @@ function handleCtrlA() {
     var aInst = aProv.instance_name || '';
     var aVec = _idxVec(aProv);
 
-    function sameLine(f) {
-        var p = f.get('provenance') || {};
-        return (p.file || '').replace(/\\/g, '/') === aFile && p.line === aLine;
-    }
-    var lineGroup = allFeatures.filter(sameLine);
+    var lineGroup = selectionLookup().lineGroup(aProv);
 
     // Ladder of selection levels, innermost first:
     //   L1: same instance + full index vector (one loop iteration / one array
@@ -729,39 +748,7 @@ function _selectFeaturesBySource(targetFile, targetLine) {
     targetLine = parseInt(targetLine, 10);
     if (!targetFile || isNaN(targetLine)) return;
 
-    var matches = allFeatures.filter(function(f) {
-        var prov = f.get('provenance') || {};
-        var fFile = (prov.resolved_file || prov.file || '').replace(/\\/g, '/');
-        var fBase = fFile.split('/').pop() || '';
-        var tBase = targetFile.split('/').pop() || '';
-        if (fFile.toLowerCase() !== targetFile.toLowerCase()) return false;
-        var fLine = typeof prov.line === 'number' ? prov.line : parseInt(String(prov.line), 10);
-        return fLine === targetLine;
-    });
-
-    // Also check call_chain entries
-    var chainMatches = allFeatures.filter(function(f) {
-        var prov = f.get('provenance') || {};
-        var chain = prov.call_chain || [];
-        return chain.some(function(cc) {
-            var ccFile = (cc.resolved_file || cc.file || '').replace(/\\/g, '/');
-            var ccBase = ccFile.split('/').pop() || '';
-            var tBase = targetFile.split('/').pop() || '';
-            if (ccFile.toLowerCase() !== targetFile.toLowerCase()) return false;
-            var ccLine = typeof cc.line === 'number' ? cc.line : parseInt(String(cc.line), 10);
-            return ccLine === targetLine;
-        });
-    });
-
-    // Merge, deduplicate by ol_uid
-    var seen = {};
-    var all = [];
-    matches.concat(chainMatches).forEach(function(f) {
-        if (!seen[f.ol_uid]) {
-            seen[f.ol_uid] = true;
-            all.push(f);
-        }
-    });
+    var all = selectionLookup().bySource(targetFile,targetLine);
 
     if (all.length > 0) {
         replaceSelection(all);
@@ -941,6 +928,7 @@ var gdsGeoJsonFmt = new ol.format.GeoJSON({
 
 var source = new ol.source.Vector();
 
+
 // Highlight style for selected feature
 var highlightStyle = new ol.style.Style({
     stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 }),
@@ -958,7 +946,7 @@ var vectorLayer = new ol.layer.Vector({
         var labelText = feature.get('label');
         if (selected) {
             if (labelText) {
-                return vectorStyleCache(JSON.stringify(['selected', labelText]), function(){return new ol.style.Style({
+                return vectorStyleCache(['selected', labelText], function(){return new ol.style.Style({
                     stroke: new ol.style.Stroke({ color: '#ffffff', width: 3 }),
                     fill: new ol.style.Fill({ color: 'rgba(255,255,255,0.3)' }),
                     text: new ol.style.Text({
@@ -974,7 +962,7 @@ var vectorLayer = new ol.layer.Vector({
         var color = feature.get('color') || '#fff';
         var visible = feature.get('visible') !== false;
         if (!visible) return hiddenVectorStyle;
-        return vectorStyleCache(JSON.stringify(['normal', color, labelText || '']), function(){
+        return vectorStyleCache(['normal', color, labelText || ''], function(){
             var style = new ol.style.Style({
                 stroke: new ol.style.Stroke({ color: color, width: 1 }),
                 fill: new ol.style.Fill({ color: color + '80' })
@@ -998,6 +986,10 @@ var map = new ol.Map({
     layers: [vectorLayer, drawLayer, portLayer],
     view: new ol.View({ center: [0, 0], zoom: 2, minZoom: -20, maxZoom: 40 }),
     controls: []
+});
+
+source.on('changefeature',function(event){
+    if(sourceSelectionLookup&&!sourceSelectionLookup.matchesProvenance(event.feature))sourceSelectionLookup=null;
 });
 
 // Select interaction -- multi-select capable
@@ -1795,6 +1787,7 @@ function bindCanvasContextMenu() {
 // Load GDS data (receives GeoJSON from extension via postMessage)
 // ============================================================
 function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
+    sourceSelectionLookup=null;
     if(reviewTools)reviewTools.resetDocument(gdsPath);
     relatedOrderTargets=null;
     primitiveDraft=null;closeShapeMenu();closeCanvasContextMenu();
@@ -1831,18 +1824,20 @@ function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
             layerColors[key] = props.color;
             var geom = gdsGeoJsonFmt.readGeometry(feature.geometry);
             var f = new ol.Feature({ geometry: geom });
-            f.set('elementId', props.element_id || 'fixture-' + index);
-            f.set('layer', key);
-            f.set('color', props.color);
-            f.set('layerKey', key);
-            f.set('visible', true);
-            f.set('selected', false);
-            f.set('provenance', props.provenance || {});
-            f.set('meta', {
+            f.setProperties({
+                elementId: props.element_id || 'fixture-' + index,
+                layer: key,
+                color: props.color,
+                layerKey: key,
+                visible: true,
+                selected: false,
+                provenance: props.provenance || {},
+                meta: {
                 area_um2: props.area_um2,
                 vertex_count: props.vertex_count,
                 bbox: props.bbox || []
-            });
+                }
+            }, true);
             allFeatures.push(f);
             var layerFeatures=featuresByLayer.get(key);
             if(!layerFeatures){layerFeatures=[];featuresByLayer.set(key,layerFeatures);}
@@ -2272,15 +2267,19 @@ function placeMicroImage(scope){
 }
 var imgMoveMode = false;
 var imageBusy=false, imageLoadSerial=0, imageRevision=0, imageSaveTimer=null;
-var imageSaveStatus='', imageFeedback='', currentLayoutHash=null;
+var imageSaveStatus='', imageFeedback='', currentLayoutHash=null, imageListSignature='', imageListItems=[];
 
 function updateImageControls() {
     var panel=document.getElementById('image-controls');if(!panel)return;panel.hidden=!microImg||currentMode!=='select';
     var notice=document.getElementById('image-empty-notice');notice.hidden=!!microImg||!imageFeedback;notice.textContent=imageFeedback;
     document.getElementById('img-align-btn').disabled=!microImg||imageBusy;
-    if(!microImg)return;
-    var stack=document.getElementById('image-stack');stack.textContent='';
-    microImages.slice().reverse().forEach(function(item){
+    var stack=document.getElementById('image-stack'),chooser=document.getElementById('image-select');
+    if(!microImg){stack.textContent='';chooser.textContent='';imageListSignature='';imageListItems=[];return;}
+    var listKey=JSON.stringify([imageBusy,microImages.map(function(item){return [item.imageId,item.name,item.visible!==false,item.locked!==false,Math.round(item.opacity*100),item===microImg];})]);
+    var sameItems=microImages.length===imageListItems.length&&microImages.every(function(item,i){return item===imageListItems[i];});
+    if(listKey!==imageListSignature||!sameItems){
+      stack.textContent='';
+      microImages.slice().reverse().forEach(function(item){
         var row=document.createElement('div');row.className='image-stack-row';row.dataset.imageId=item.imageId;
         row.setAttribute('aria-current',String(item===microImg));
         var show=document.createElement('input');show.type='checkbox';show.checked=item.visible!==false;show.disabled=imageBusy;
@@ -2290,7 +2289,10 @@ function updateImageControls() {
         button.onclick=function(){selectMicroImage(microImages.indexOf(item));};
         var opacity=document.createElement('small');opacity.textContent=Math.round(item.opacity*100)+'%';
         row.append(show,button,opacity);stack.appendChild(row);
-    });
+      });
+      imageListSignature=listKey;
+      imageListItems=microImages.slice();
+    }
     var display=Object.assign({},MicroscopeOverlay.defaultDisplay(),microImg.display||{});
     document.getElementById('image-display').value=display.mode;
     document.getElementById('image-border').checked=display.border;
@@ -2301,7 +2303,10 @@ function updateImageControls() {
     document.getElementById('image-contour-settings').hidden=display.mode==='image'&&!display.border;
     document.getElementById('image-contour-threshold').disabled=imageBusy||display.mode==='image';
     for(var control of ['image-display','image-border','image-contour-color','image-contour-width'])document.getElementById(control).disabled=imageBusy;
-    var chooser=document.getElementById('image-select');chooser.textContent='';microImages.forEach(function(item,i){var option=document.createElement('option');option.value=String(i);option.textContent=(i+1)+'. '+item.name;chooser.appendChild(option);});chooser.value=String(microImages.indexOf(microImg));chooser.disabled=imageBusy;
+    if (chooser.options.length!==microImages.length || chooser.dataset.imageListSignature!==listKey) {
+      chooser.textContent='';microImages.forEach(function(item,i){var option=document.createElement('option');option.value=String(i);option.textContent=(i+1)+'. '+item.name;chooser.appendChild(option);});chooser.dataset.imageListSignature=listKey;
+    }
+    chooser.value=String(microImages.indexOf(microImg));chooser.disabled=imageBusy;
     document.getElementById('image-lower').disabled=imageBusy||microImages.indexOf(microImg)<=0;
     document.getElementById('image-raise').disabled=imageBusy||microImages.indexOf(microImg)>=microImages.length-1;
     document.getElementById('image-place').disabled=imageBusy;

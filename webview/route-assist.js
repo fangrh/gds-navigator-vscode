@@ -70,7 +70,7 @@
                 if(reference.length<2)throw Error('Draw a reference or choose two endpoints first.');
                 const s=spec(),data=collect(),signature=fingerprint(),token=serial;
                 showMask(data);message('Finding route… '+data.summary);$('route-plan').disabled=true;
-                const code=root.routePlannerWorkerSource+'\nself.onmessage=function(e){self.postMessage(RoutePlanner.plan(e.data));};';
+                const code=root.routePlannerWorkerSource+'\nself.onmessage=function(e){GdsGeometryKernel.setModule(e.data.geometryModule);self.postMessage(RoutePlanner.plan(e.data.spec));};';
                 const url=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
                 try{worker=new Worker(url);}finally{URL.revokeObjectURL(url);}
                 timer=setTimeout(()=>{stop();message('Routing reached the time limit. Increase the search grid or shorten the reference.');},15000);
@@ -83,7 +83,8 @@
                         $('route-points').value=JSON.stringify(result.points);message('Green route ready. Use route to save. '+data.summary);
                     }catch(error){message(error.message);}
                 };
-                worker.postMessage({...s,start:reference[0],end:reference[reference.length-1],reference:s.method==='guided'?reference:undefined,obstacles:data.obstacles,maxCells:40000});
+                const geometryModule=data.obstacles.length?root.GdsGeometryKernel.getModule():null;
+                worker.postMessage({geometryModule,spec:{...s,start:reference[0],end:reference[reference.length-1],reference:s.method==='guided'?reference:undefined,obstacles:data.obstacles,maxCells:40000}});
             }catch(error){stop();message(error.message);}
         }
         guides.forEach(g=>g.on('drawend',e=>{reference=e.feature.getGeometry().simplify(Math.max(.001,Number($('route-grid').value)||1)*.2).getCoordinates().map(p=>p.slice());

@@ -109,7 +109,10 @@
         if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1) throw new Error('Image has invalid dimensions');
         if (w * h > MAX_IMAGE_PIXELS) throw new Error('Image exceeds pixel resource limit');
         const appearance = options.markerAppearance;
-        const c=canvas(w,h),ctx=c.getContext('2d');if (!ctx) throw new Error('Canvas 2D context unavailable');ctx.drawImage(image,0,0);
+        // The worker already decoded its ImageBitmap into a private canvas.
+        // Read that canvas directly instead of making a second full-image copy.
+        const decoded=typeof root.OffscreenCanvas!=='undefined'&&image instanceof root.OffscreenCanvas;
+        const c=decoded?image:canvas(w,h),ctx=c.getContext('2d');if (!ctx) throw new Error('Canvas 2D context unavailable');if(!decoded)ctx.drawImage(image,0,0);
         const rgba=ctx.getImageData(0,0,w,h).data,mask=new Uint8Array(w*h),labelMask=new Uint8Array(w*h),seen=new Uint8Array(w*h),pads=[];
         for(let i=0;i<mask.length;i++) {const r=rgba[4*i],g=rgba[4*i+1],b=rgba[4*i+2],y=(r+g+b)/3;mask[i]=appearance==='bright'?(y>210?1:0):appearance==='dark'?(y<65?1:0):(Math.min(r,g)-b>65&&r>100&&g>90?1:0);labelMask[i]=appearance==='bright'?(y>190?1:0):appearance==='dark'?(y<100?1:0):(Math.min(r,g)-b>25&&r>100&&g>90?1:0);}
         for(let i=0;i<mask.length;i++) {

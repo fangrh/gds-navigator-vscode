@@ -146,7 +146,7 @@ async function startServer(options = {}) {
                 requireHash(doc, m);
                 if (!Array.isArray(m.imageIds) || m.imageIds.length !== doc.state.images.length || new Set(m.imageIds).size !== m.imageIds.length || !m.imageIds.every(id => doc.state.images.some(i => i.imageId === id))) throw new Error('Invalid image order.');
                 doc.state.images = m.imageIds.map(id => doc.state.images.find(i => i.imageId === id)); saveState(doc); break;
-            case 'requestComponentCatalog': reply('componentCatalog', { requestId: m.requestId, result: await s.loadComponentCatalog(python) }); break;
+            case 'requestComponentCatalog': reply('componentCatalog', { requestId: m.requestId, result: await s.loadComponentCatalog(python, undefined, undefined, m.refresh === true) }); break;
             case 'previewComponent': reply('componentPreview', { requestId: m.requestId, result: await s.previewComponent(python, m.name, m.settings) }); break;
             case 'requestComponentThumbnails': reply('componentThumbnails', { requestId: m.requestId, result: await s.requestComponentThumbnails(python, m.names) }); break;
             case 'exportYaml': {
@@ -254,7 +254,7 @@ async function startServer(options = {}) {
             }
             if (route === '/favicon.ico') { res.writeHead(204); return res.end(); }
             const decoded = decodeURIComponent(route);
-            if (!/^\/(webview\/[\w-]+\.(?:js|css)|web\/browser-host\.(?:js|css)|media\/ol\.(?:js|css))$/.test(decoded)) return json({ error: 'Not found.' }, 404);
+            if (!/^\/(webview\/[\w-]+\.(?:js|css)|web\/browser-host\.(?:js|css)|media\/(?:ol\.(?:js|css)|geometry-kernel\.js))$/.test(decoded)) return json({ error: 'Not found.' }, 404);
             const file = fs.realpathSync(path.join(ROOT, decoded.slice(1)));
             if (!within(ROOT, file)) return json({ error: 'Not found.' }, 404);
             const mime = path.extname(file) === '.css' ? 'text/css' : 'text/javascript';

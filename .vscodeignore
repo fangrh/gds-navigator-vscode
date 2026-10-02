@@ -1,4 +1,5 @@
 src/**
+rust/**
 web/**
 node_modules/**
 test/**

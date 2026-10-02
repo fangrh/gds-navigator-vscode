@@ -226,6 +226,20 @@ npm run compile      # dist/extension.js + media/ol.js|ol.css (esbuild)
 
 Press **F5** in VS Code to launch the Extension Development Host.
 
+Guided/automatic routing uses a bundled Rust/Wasm collision kernel and spatial
+index. Normal builds need no Rust installation; `npm run build:rust` regenerates
+the committed artifact after Rust source changes. See
+[Rust routing performance and verification](docs/rust-routing-performance.md)
+for scoped measurements, fallback behavior and test commands.
+
+The shared viewer also reduces metadata notifications, style-key work, redundant
+port updates, image-control rebuilding and image projection/copy work. See
+[shared editor measurements](docs/shared-editor-performance.md).
+
+Source selection now uses lazy document indexes, and repeated built-in component
+requests share bounded host caches/processes. See
+[source and component measurements](docs/selection-component-performance.md).
+
 - `src/` — extension host (editor provider, env picker, runner, clipboard).
 - `webview/viewer.html` — the viewer UI + alignment engine
   (`webview/ol-bundle.ts` bundles npm `ol` into `media/ol.js`; no CDN).

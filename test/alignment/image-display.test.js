@@ -20,7 +20,11 @@ const source = fs.readFileSync(require('path').join(__dirname, '../../webview/mi
 const canvases = [];
 const sandbox = {
   NumberedMarkerAlignment: {
-    project(h, p) { return [h[0] * p[0] + h[2], h[4] * p[1] + h[5]]; },
+    project(h, p) {
+      const z = h[6] * p[0] + h[7] * p[1] + h[8];
+      if (!Number.isFinite(z) || Math.abs(z) < 1e-12) throw new Error('Invalid marker transform denominator');
+      return [(h[0] * p[0] + h[1] * p[1] + h[2]) / z, (h[3] * p[0] + h[4] * p[1] + h[5]) / z];
+    },
     inverse(h) {
       const det = h[0] * h[4] - h[1] * h[3];
       return [h[4] / det, -h[1] / det, (h[1] * h[5] - h[4] * h[2]) / det,

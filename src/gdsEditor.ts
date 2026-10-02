@@ -321,7 +321,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
                     if (controller.signal.aborted || entry.disposed) return;
                     const projectRoot = vscode.workspace.isTrusted ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(entry.gdsPath))?.uri.fsPath : undefined;
                     const result = message.type === 'requestComponentCatalog'
-                        ? await loadComponentCatalog(this.env.getPython(entry.gdsPath), controller.signal, projectRoot)
+                        ? await loadComponentCatalog(this.env.getPython(entry.gdsPath), controller.signal, projectRoot, message.refresh === true)
                         : await previewComponent(this.env.getPython(entry.gdsPath), message.name, message.settings, controller.signal, projectRoot);
                     if (message.type === 'requestComponentCatalog' && !vscode.workspace.isTrusted) {
                         (result as any).warnings = [...((result as any).warnings || []), 'Trust this workspace to load project components from gds_components.py.'];
@@ -1307,10 +1307,11 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
             "worker-src blob:",
             `img-src ${webview.cspSource} data: blob:`,
             `style-src ${webview.cspSource} 'unsafe-inline'`,
-            `script-src ${webview.cspSource} 'unsafe-inline'`,
+            `script-src ${webview.cspSource} 'unsafe-inline' 'wasm-unsafe-eval'`,
             `font-src ${webview.cspSource}`,
         ].join('; ');
         const workerSource = ['numbered-marker-alignment.js', 'numbered-marker-worker.js'].map(name => fs.readFileSync(path.join(this.context.extensionUri.fsPath, 'webview', name), 'utf8')).join('\n');
+        const routeWorkerSource = ['rust-geometry.js', 'route-planner.js'].map(name => fs.readFileSync(path.join(this.context.extensionUri.fsPath, 'webview', name), 'utf8')).join('\n');
         return this.htmlTemplate
             .replace('__EDA_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'eda-workbench.js'))}"></script>`)
             .replace('__REVIEW_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'layout-review.js'))}"></script>`)
@@ -1320,8 +1321,9 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
             .replace('__WORKER_SOURCE__', `<script>window.numberedMarkerWorkerSource=${JSON.stringify(workerSource).replace(/</g, '\\u003c')};</script>`)
             .replace('__MARKER_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'numbered-marker-alignment.js'))}"></script>`)
             .replace('__OVERLAY_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'microscope-overlay.js'))}"></script>`)
-            .replace('__ROUTE_JS__', ['manhattan-route.js','route-planner.js','route-image-mask.js','route-assist.js'].map(file => `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', file))}"></script>`).join('') + `<script>window.routePlannerWorkerSource=${JSON.stringify(fs.readFileSync(path.join(this.context.extensionUri.fsPath, 'webview', 'route-planner.js'),'utf8')).replace(/</g, '\\u003c')};</script>`)
+            .replace('__ROUTE_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'geometry-kernel.js'))}"></script>` + ['rust-geometry.js','manhattan-route.js','route-planner.js','route-image-mask.js','route-assist.js'].map(file => `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', file))}"></script>`).join('') + `<script>window.routePlannerWorkerSource=${JSON.stringify(routeWorkerSource).replace(/</g, '\\u003c')};</script>`)
             .replace('__PROPERTIES_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'shape-properties.js'))}"></script>`)
+            .replace('__SOURCE_SELECTION_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'source-selection.js'))}"></script>`)
             .replace('__CHOOSER_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'component-chooser.js'))}"></script>`)
             .replace('__PRIMITIVE_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'layout-primitives.js'))}"></script>`)
             .replace('__PORT_JS__', `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'port-overlay.js'))}"></script>`)

@@ -6,6 +6,8 @@ Format based on Keep a Changelog; versioning: SemVer.
 ## Unreleased
 
 ### Added
+- Rust/Wasm collision checks with a spatial obstacle index for guided/automatic
+  routing, shared by VS Code and the browser host, with JavaScript fallback.
 - Local browser development host using the same editor and domain modules as
   the extension, with persistent debug sessions, browser tests and profiling.
 - Guided and automatic routing around GDS and detected image obstacles, with
@@ -13,6 +15,12 @@ Format based on Keep a Changelog; versioning: SemVer.
 - Electrical 45° route style and manual waypoint backtracking.
 
 ### Fixed
+- Repeated source navigation uses lazy provenance indexes; built-in component
+  catalogs/previews reuse bounded results and concurrent child processes with
+  independent cancellation and explicit fresh library refreshes.
+- Shared viewer initialization, style caches, port refresh and image controls
+  avoid redundant work. Image warping avoids per-pixel point tuples, and worker
+  marker extraction reuses its decoded canvas with identical alignment results.
 - Shared editor loads avoid maintaining snap indexes while snapping is off;
   document replacement clears old indexes in bulk and restores active snapping.
 - Component catalog keyboard navigation with arrow keys, Home/End, and

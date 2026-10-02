@@ -3,6 +3,10 @@
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
+import geometryArtifact from './scripts/geometry-artifact.cjs';
+
+// Runtime ships prebuilt Wasm; normal JS builds need no Rust installation.
+geometryArtifact.verifyArtifact();
 
 fs.mkdirSync('media', { recursive: true });
 

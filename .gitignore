@@ -1,4 +1,5 @@
 node_modules/
+**/target/
 dist/
 media/ol.js
 media/ol.css

@@ -69,12 +69,18 @@
         const ow=Math.max(1,Math.min(2400,Math.ceil((extent[2]-extent[0])/state.umPerPx))),oh=Math.max(1,Math.min(2400,Math.ceil((extent[3]-extent[1])/state.umPerPx)));
         if(!entry.warped || entry.key!==key || entry.warpedWidth!==ow || entry.warpedHeight!==oh) {
             const dst=new Uint8ClampedArray(ow*oh*4),src=entry.pixels,inv=api.inverse(H);
-            for(let y=0;y<oh;y++)for(let x=0;x<ow;x++){
-                const p=api.project(inv,[extent[0]+(x+.5)*(extent[2]-extent[0])/ow,extent[3]-(y+.5)*(extent[3]-extent[1])/oh]);
-                const sx=p[0]-.5,sy=p[1]-.5,x0=Math.floor(sx),y0=Math.floor(sy),fx=sx-x0,fy=sy-y0;
+            for(let y=0;y<oh;y++){
+                const wy=extent[3]-(y+.5)*(extent[3]-extent[1])/oh;
+                for(let x=0;x<ow;x++){
+                const wx=extent[0]+(x+.5)*(extent[2]-extent[0])/ow;
+                // Preserve project() arithmetic and rejection exactly, while
+                // avoiding two temporary point arrays for every output pixel.
+                const z=inv[6]*wx+inv[7]*wy+inv[8];
+                if(!Number.isFinite(z)||Math.abs(z)<1e-12)throw new Error('Invalid marker transform denominator');
+                const sx=(inv[0]*wx+inv[1]*wy+inv[2])/z-.5,sy=(inv[3]*wx+inv[4]*wy+inv[5])/z-.5,x0=Math.floor(sx),y0=Math.floor(sy),fx=sx-x0,fy=sy-y0;
                 if(x0<0||y0<0||x0+1>=w||y0+1>=h)continue;
                 for(let ch=0;ch<4;ch++)dst[4*(y*ow+x)+ch]=(1-fy)*((1-fx)*src[4*(y0*w+x0)+ch]+fx*src[4*(y0*w+x0+1)+ch])+fy*((1-fx)*src[4*((y0+1)*w+x0)+ch]+fx*src[4*((y0+1)*w+x0+1)+ch]);
-            }
+            }}
             entry.warped=dst;entry.borderMask=null;entry.contourMask=null;entry.contourMaskThreshold=null;entry.warpedWidth=ow;entry.warpedHeight=oh;
         }
         if(d.border&&!entry.borderMask){
