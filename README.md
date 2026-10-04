@@ -165,7 +165,7 @@ returns a nonzero exit code and retains diagnostics. The source files are unchan
 | Capability | Needs |
 |---|---|
 | Viewing / zooming any `.gds` | Python env with [`klayout`](https://pypi.org/project/klayout/) (`pip install klayout`) |
-| Provenance generation (sidecars, jump-to-source) | The [fangrh/gdsfactory](https://github.com/fangrh/gdsfactory) fork |
+| Provenance generation (sidecars, jump-to-source) | The [provenance-tracking branch of fangrh/gdsfactory](https://github.com/fangrh/gdsfactory/tree/feat/provenance-tracking) |
 
 Python selection is automatic by default: the extension checks installed environments
 and prefers one with the provenance-enabled gdsfactory fork and KLayout. Automatic
@@ -193,6 +193,17 @@ must not already exist. After Python is checked, you can save it as-is, install
 KLayout, install KLayout plus standard gdsfactory, or install KLayout plus a local
 editable gdsfactory fork. Package installation targets the selected interpreter.
 Standard gdsfactory does not provide this project's provenance feature.
+The fork's `main` branch also lacks it; use `feat/provenance-tracking` when
+preparing the local editable fork:
+
+```sh
+git clone --branch feat/provenance-tracking --single-branch https://github.com/fangrh/gdsfactory.git
+```
+
+After installing that checkout into the selected environment, verify it with
+`python -c "from gdsfactory.provenance import ProvenanceTracker; assert callable(ProvenanceTracker.write_sidecar)"`.
+Then rebuild the actual generating script with `GDS_PROVENANCE=1`. A plain GDS
+without embedded source metadata or its matching sidecar remains untracked.
 
 Setup writes `.gds-navigator/environment.json`, a `gds-python.cmd` launcher, and a
 managed section in `AGENTS.md` linking to the environment guide. Existing agent

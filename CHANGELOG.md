@@ -15,6 +15,10 @@ Format based on Keep a Changelog; versioning: SemVer.
 - Electrical 45° route style and manual waypoint backtracking.
 
 ### Fixed
+- First canvas selection avoids OpenLayers' blocking 150 ms readback benchmark;
+  the hit canvas uses an explicit readback hint, with unchanged picking semantics.
+- Provenance setup names the required fork branch, and real Python provenance
+  checks support macOS/Linux and fail for missing explicit test interpreters.
 - Repeated source navigation uses lazy provenance indexes; built-in component
   catalogs/previews reuse bounded results and concurrent child processes with
   independent cancellation and explicit fresh library refreshes.

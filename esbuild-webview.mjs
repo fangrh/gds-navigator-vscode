@@ -17,6 +17,28 @@ await esbuild.build({
   outfile: 'media/ol.js',
   minify: true,
   legalComments: 'none',
+  plugins: [{
+    name: 'readback-hit-context',
+    setup(build) {
+      build.onLoad({ filter: /[/\\]ol[/\\]render[/\\]canvas[/\\]ExecutorGroup\.js$/ }, (args) => {
+        let contents = fs.readFileSync(args.path, 'utf8');
+        // OpenLayers benchmarks three 50 ms canvas loops on the first pick.
+        // Its tiny hit canvas always reads pixels; prefer a readback context
+        // directly so that selecting geometry never runs this blocking probe.
+        const defaults = [
+          ['let willReadFrequently = false;', 'let willReadFrequently = true;'],
+          ['let canvasReadsBenchmarked = false;', 'let canvasReadsBenchmarked = true;'],
+        ];
+        for (const [before, after] of defaults) {
+          if (contents.split(before).length !== 2) {
+            throw new Error('OpenLayers hit-context defaults changed; review the first-pick optimization before bundling.');
+          }
+          contents = contents.replace(before, after);
+        }
+        return { contents, loader: 'js', resolveDir: path.dirname(args.path) };
+      });
+    },
+  }],
 });
 
 // ol ships a single stylesheet; copy it next to the bundle.

@@ -21,6 +21,23 @@ const load = Module._load; Module._load = (name, ...args) => name === 'vscode' ?
 const { EnvProvider, pythonInPrefix, inspectPython } = require(out); Module._load = load;
 const values = new Map();
 const context = { workspaceState: { get: (k) => values.get(k), update: async (k, v) => { if (v === undefined) values.delete(k); else values.set(k, v); } }, subscriptions };
+function realInterpreter() {
+  // Test override precedence is GDS_TEST_PYTHON, then GDS_PYTHON; both are
+  // explicit paths and a missing one is an error. Without an override, the
+  // platform-native .venv-fork path is optional and may be skipped.
+  const override = (process.env.GDS_TEST_PYTHON || process.env.GDS_PYTHON || '').trim();
+  if (override) {
+    const resolved = path.resolve(override);
+    if (!fs.existsSync(resolved)) throw new Error(`Requested test interpreter does not exist: ${resolved}`);
+    return resolved;
+  }
+  const optional = path.join(root, '.venv-fork', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  if (!fs.existsSync(optional)) {
+    console.log(JSON.stringify({ status: 'info', skipped: 'real interpreter', reason: `Optional fork interpreter is absent: ${optional}`, instruction: 'Set GDS_TEST_PYTHON (preferred) or GDS_PYTHON to a provenance-enabled interpreter.' }));
+    return undefined;
+  }
+  return optional;
+}
 async function main() {
   let probes = 0;
   const provider = new EnvProvider(context, { discover: async () => ['bad', 'good'], probe: async (p) => { probes++; await new Promise(r => setTimeout(r, 2)); return p === 'good' ? { executable: p, gdsfactory: { path: '/fork/gdsfactory/__init__.py' }, klayout: { path: '/klayout/db.py' }, provenance: { available: true } } : { executable: p, error: 'broken' }; } });
@@ -48,8 +65,8 @@ async function main() {
     fs.mkdirSync(path.join(temp,'Scripts'));fs.writeFileSync(path.join(temp,'Scripts/python.exe'),'');
     assert.equal(pythonInPrefix(temp),path.join(temp,'Scripts/python.exe'));
   }
-  const real=path.join(root,'.venv-fork',process.platform==='win32'?'Scripts/python.exe':'bin/python');
-  if(fs.existsSync(real)) { const d=await inspectPython(real); assert.equal(d.provenance?.available,true);assert(d.klayout?.path);assert(!d.error); }
+  const real = realInterpreter();
+  if (real) { const d=await inspectPython(real); assert.equal(d.provenance?.available,true);assert(d.klayout?.path);assert(!d.error); }
   const missing=await inspectPython(path.join(temp,'missing-python'));assert(missing.error);
   // First GDS open: accept checked runtime once; subsequent opens retain folder default.
   values.clear();config.gdsNavigator='';

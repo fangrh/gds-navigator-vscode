@@ -7,6 +7,23 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '../..');
+function realInterpreter() {
+  // Test override precedence is GDS_TEST_PYTHON, then GDS_PYTHON; both are
+  // explicit paths and a missing one is an error. Without an override, the
+  // platform-native .venv-fork path is optional and may be skipped.
+  const override = (process.env.GDS_TEST_PYTHON || process.env.GDS_PYTHON || '').trim();
+  if (override) {
+    const resolved = path.resolve(override);
+    if (!fs.existsSync(resolved)) throw new Error(`Requested test interpreter does not exist: ${resolved}`);
+    return resolved;
+  }
+  const optional = path.join(ROOT, '.venv-fork', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  if (!fs.existsSync(optional)) {
+    console.log(JSON.stringify({ status: 'info', skipped: 'python parser', reason: `Optional fork interpreter is absent: ${optional}`, instruction: 'Set GDS_TEST_PYTHON (preferred) or GDS_PYTHON to a provenance-enabled interpreter.' }));
+    return undefined;
+  }
+  return optional;
+}
 const bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gds-contract-bundle-'));
 require('esbuild').buildSync({entryPoints:[path.join(ROOT,'src','sidecar.ts')],bundle:true,platform:'node',format:'cjs',external:['vscode'],outfile:path.join(bundleDir,'sidecar.js')});
 require('esbuild').buildSync({entryPoints:[path.join(ROOT,'src','parseGds.ts')],bundle:true,platform:'node',format:'cjs',external:['vscode'],outfile:path.join(bundleDir,'parseGds.js')});
@@ -34,8 +51,8 @@ Module._load = originalLoad;
     const sourceGds = path.join(ROOT, 'test', 'fixtures', 'jj_pad_center_50_test.gds');
     const parseGds = path.join(dir, 'parse.gds'); fs.copyFileSync(sourceGds, parseGds);
     fs.writeFileSync(path.join(dir, 'parse.provenance.json'), JSON.stringify({ entries: [null, { id: 7, file: 'build.py' }, { id: [], file: 'invalid.py' }, 3], ports: [], ref_names: 'bad' }));
-    const py = path.join(ROOT, '.venv-fork', 'Scripts', 'python.exe');
-    if (fs.existsSync(py)) {
+    const py = realInterpreter();
+    if (py) {
       const parsed = JSON.parse(execFileSync(py, [path.join(ROOT, 'python', 'parse_gds.py'), parseGds], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
       assert.equal(parsed.type, 'FeatureCollection'); assert.equal(parsed.error, undefined); assert(parsed._diag.sidecar_warnings.length >= 2);
       const parsedThroughApi = await parseGdsFile(py, parseGds, ROOT);
