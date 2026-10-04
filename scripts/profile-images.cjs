@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const puppeteer = require('puppeteer-core');
+const { closeOwnedBrowser } = require('./process-cleanup.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const currentPath = path.join(ROOT, 'webview/microscope-overlay.js');
@@ -89,7 +90,7 @@ async function main() {
         const report = { status: 'passed', at: new Date().toISOString(), browser: await browser.version(), currentSourceSha256: sha(currentSource), markerSourceSha256: sha(markerSource), beforeSource: beforePath, beforeSourceSha256: sha(beforeSource), cases, displays: displays.map(x => x.name), poseSamplesPerVariant: 12, variantOrder: ['current-js','saved-original-js','saved-original-js','current-js'], runs, limits: 'Fresh Chromium page per variant/case; image decode warmed once. Timed render includes bilinear image warp, display processing, canvas putImageData and PNG data URL encoding. All returned PNG bytes and extents match the saved original. Color-only samples are reported separately because the existing warped-image cache avoids another warp.' };
         fs.writeFileSync(path.join(out, 'profile.json'), `${JSON.stringify(report, null, 2)}\n`);
         console.log(JSON.stringify({ report: path.join(out, 'profile.json'), cases: runs.length, status: report.status }));
-    } finally { await browser.close(); }
+    } finally { await closeOwnedBrowser(browser); }
 }
 
 main().catch(error => { console.error(error.stack || error); process.exitCode = 1; });

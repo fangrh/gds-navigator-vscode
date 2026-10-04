@@ -176,6 +176,7 @@
     "profile:components": "node scripts/profile-component-cache.cjs",
     "test:selection-index": "node test/reliability/source-selection.test.js && node test/reliability/source-selection-viewer.test.js",
     "test:canvas-hit": "npm run build:webview && node test/reliability/canvas-hit-performance.test.js",
+    "test:shutdown": "node test/reliability/process-cleanup.test.js",
     "test:component-cache": "node test/reliability/component-cache.test.js && node test/reliability/component-concurrency.test.js && node test/reliability/component-cache-lifecycle.test.js",
     "test:shared-performance": "node test/reliability/broad-editor-performance.test.js && node test/alignment/worker-image-performance.test.js",
     "package": "npm run build:webview && node esbuild.mjs --production",

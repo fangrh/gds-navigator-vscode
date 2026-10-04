@@ -5,6 +5,7 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const puppeteer = require('puppeteer-core');
+const { closeOwnedBrowser } = require('./process-cleanup.cjs');
 const { startServer } = require('./serve-web.cjs');
 const { verifyArtifact } = require('./geometry-artifact.cjs');
 const ROOT = path.resolve(__dirname, '..');
@@ -89,9 +90,12 @@ async function main() {
         fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
         console.log(JSON.stringify({ report: path.join(out, 'report.json'), compileMs: report.compileMs, cases: cases.map(({ obstacles, medians, routeSha256 }) => ({ obstacles, medians, routeSha256 })) }, null, 2));
     } finally {
-        if (browser) await browser.close();
-        await host.close();
-        fs.rmSync(temp, { recursive: true, force: true });
+        let stopped = !browser;
+        try { if (browser) { await closeOwnedBrowser(browser); stopped = true; } }
+        finally {
+            try { await host.close(); }
+            finally { if (stopped) fs.rmSync(temp, { recursive: true, force: true }); }
+        }
     }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

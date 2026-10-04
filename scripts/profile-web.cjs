@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const puppeteer = require('puppeteer-core');
 const { startServer } = require('./serve-web.cjs');
+const { closeOwnedBrowser } = require('./process-cleanup.cjs');
 const ROOT = path.resolve(__dirname, '..');
 const executable = [process.env.GDS_BROWSER,
     path.join(process.env.LOCALAPPDATA || '', 'ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe'),
@@ -129,6 +130,13 @@ async function main() {
         fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
         await page.screenshot({ path: path.join(out, '10000-features.png') });
         console.log(JSON.stringify({ report: path.join(out, 'report.json'), runs: runs.map(({ panRenderSamplesMs, ...run }) => run) }, null, 2));
-    } finally { if (browser) await browser.close(); await host.close(); fs.rmSync(temp, { recursive: true, force: true }); }
+    } finally {
+        let stopped = !browser;
+        try { if (browser) { await closeOwnedBrowser(browser); stopped = true; } }
+        finally {
+            try { await host.close(); }
+            finally { if (stopped) fs.rmSync(temp, { recursive: true, force: true }); }
+        }
+    }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

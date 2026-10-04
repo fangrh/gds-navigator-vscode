@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const puppeteer = require('puppeteer-core');
+const { closeOwnedBrowser } = require('../../scripts/process-cleanup.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
 const requestedBrowser = process.env.CHROME_PATH || process.env.GDS_BROWSER;
@@ -130,9 +131,12 @@ async function main() {
         fs.writeFileSync(path.join(out, 'failure.json'), JSON.stringify({ status: 'failed', error: String(error), pageErrors }, null, 2));
         throw error;
     } finally {
-        if (browser) await browser.close();
-        await close();
-        fs.rmSync(temp, { recursive: true, force: true });
+        let stopped = !browser;
+        try { if (browser) { await closeOwnedBrowser(browser); stopped = true; } }
+        finally {
+            try { await close(); }
+            finally { if (stopped) fs.rmSync(temp, { recursive: true, force: true }); }
+        }
     }
 }
 

@@ -6,6 +6,7 @@ const os = require('node:os');
 const cp = require('node:child_process');
 const assert = require('node:assert/strict');
 const puppeteer = require('puppeteer-core');
+const { closeOwnedProcess } = require('../../scripts/process-cleanup.cjs');
 const ROOT = path.resolve(__dirname, '../..');
 const EXE = process.env.VSCODE_EXE, PYTHON = process.env.GDS_PYTHON;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -171,15 +172,18 @@ async function main() {
                 console.log(`VS Code cycle ${cycle + 1}: 1/5/10-file Wasm, clipboard and persistence checks passed`);
             } finally {
                 if (lastCopy !== undefined) await request('restoreClipboard', { expected: lastCopy }).catch(() => {});
-                if (browser) await browser.disconnect();
-                fs.writeFileSync(path.join(bridge, 'request.json'), JSON.stringify({ id: ++requestId, action: 'stop' }));
-                if (child.exitCode === null) {
-                    const exited = new Promise(resolve => child.once('exit', resolve));
-                    await Promise.race([exited, sleep(5000)]);
-                    if (child.exitCode === null) { child.kill(); await Promise.race([exited, sleep(5000)]); }
+                try {
+                    cycleReport.shutdown = await closeOwnedProcess(child, {
+                        profileDir: path.join(dir, 'profile'),
+                        graceful: async () => {
+                            try { if (browser) await browser.disconnect(); }
+                            finally { fs.writeFileSync(path.join(bridge, 'request.json'), JSON.stringify({ id: ++requestId, action: 'stop' })); }
+                        },
+                    });
+                } finally {
+                    fs.writeFileSync(path.join(out, `cycle-${cycle + 1}.log`), childLog);
+                    save();
                 }
-                fs.writeFileSync(path.join(out, `cycle-${cycle + 1}.log`), childLog);
-                assert(child.exitCode !== null || child.signalCode !== null, 'Test-owned VS Code did not stop; preserving its temporary workspace');
             }
         }
         report.status = 'passed'; report.finishedAt = new Date().toISOString(); save();

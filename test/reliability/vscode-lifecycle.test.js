@@ -1,6 +1,7 @@
 // Real VS Code + rendered webview journeys, isolated from user windows and designs.
 const fs=require('fs'),path=require('path'),os=require('os'),cp=require('child_process'),assert=require('assert');
 const puppeteer=require('puppeteer-core');
+const {closeOwnedProcess}=require('../../scripts/process-cleanup.cjs');
 const setupEnvMode=process.argv.includes('--setup-env');
 const provenanceRoot=process.env.GDS_VERIFY_PROJECT;
 const autoEnvMode=process.argv.includes('--auto-env')||setupEnvMode;
@@ -425,11 +426,10 @@ async function main(){
      }
      fs.writeFileSync(path.join(output,`cycle-${cycle+1}.log`),log);
    }finally{
-     if(browser)await browser.disconnect();
-     fs.writeFileSync(path.join(bridge,'request.json'),JSON.stringify({id:++id,action:'stop'}));
-     await Promise.race([new Promise(r=>child.once('exit',r)),sleep(15000)]);
-     if(child.exitCode===null)child.kill();
-     fs.writeFileSync(path.join(output,`cycle-${cycle+1}.log`),log);
+     try{
+       const shutdown=await closeOwnedProcess(child,{profileDir:path.join(dir,'profile'),graceful:async()=>{try{if(browser)await browser.disconnect();}finally{fs.writeFileSync(path.join(bridge,'request.json'),JSON.stringify({id:++id,action:'stop'}));}}});
+       records.push({scenario:'process-shutdown',cycle:cycle+1,...shutdown});
+     }finally{fs.writeFileSync(path.join(output,`cycle-${cycle+1}.log`),log);}
    }
  }
  fs.writeFileSync(path.join(output,'report.json'),JSON.stringify({status:'passed',workspace,testVsix:testVsix||null,extensionsDir:path.join(dir,'extensions'),records},null,2));
