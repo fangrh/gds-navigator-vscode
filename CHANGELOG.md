@@ -15,6 +15,8 @@ Format based on Keep a Changelog; versioning: SemVer.
 - Electrical 45° route style and manual waypoint backtracking.
 
 ### Fixed
+- Coordinate readouts keep the status footer on one line, preventing canvas
+  resizing from dismissing source menus in narrow editors with the inspector open.
 - First canvas selection avoids OpenLayers' blocking 150 ms readback benchmark;
   the hit canvas uses an explicit readback hint, with unchanged picking semantics.
 - Provenance setup names the required fork branch, and real Python provenance

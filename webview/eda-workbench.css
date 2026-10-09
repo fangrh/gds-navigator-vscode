@@ -128,7 +128,7 @@ body.dock-collapsed #eda-dock { display: none !important; }
 #instruction-bar :is(input, select, textarea, button) { color: var(--eda-fg); background: var(--eda-input); border-color: var(--eda-border); }
 #workflow-status { flex: 1 1 100%; min-width: 100px; color: var(--eda-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #eda-status { display: flex; align-items: center; gap: 12px; flex: 0 0 23px; min-width: 0; padding: 3px 9px; color: var(--eda-muted); background: var(--eda-panel); border-top: 1px solid var(--eda-border); font: 11px/1.2 var(--eda-font); }
-#eda-coordinates, #eda-selection { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#eda-status > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #eda-selection { margin-left: auto; }
 
 #rebuild-overlay { background: color-mix(in srgb, var(--eda-bg) 82%, transparent) !important; color: var(--eda-accent) !important; }
