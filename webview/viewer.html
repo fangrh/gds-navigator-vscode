@@ -532,7 +532,6 @@ document.addEventListener('keydown', function(e) {
             setMode('select');
         }
         clearSelection();
-        onSelectionChanged();
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedFeatures.getArray().some(function(f) { return f.get('isDrawn'); })) {
@@ -725,9 +724,10 @@ function handleCtrlA() {
     if (matches === null) {
         // Cycle complete: clear and reset
         rewriteLabels('');
-        clearSelection();
         selectionCycle = 0;
         if (cycleEl) { cycleEl.textContent = ''; cycleEl.style.display = 'none'; }
+        clearSelection();
+        return;
     } else {
         replaceSelection(matches);
         selectionCycle = level + 1;

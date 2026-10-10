@@ -174,7 +174,7 @@
     "profile:rust": "node scripts/profile-rust-routing.cjs",
     "profile:images": "node scripts/profile-images.cjs",
     "profile:components": "node scripts/profile-component-cache.cjs",
-    "test:selection-index": "node test/reliability/source-selection.test.js && node test/reliability/source-selection-viewer.test.js",
+    "test:selection-index": "node test/reliability/source-selection.test.js && node test/reliability/source-selection-viewer.test.js && node test/reliability/selection-clear-viewer.test.js",
     "test:canvas-hit": "npm run build:webview && node test/reliability/canvas-hit-performance.test.js",
     "test:shutdown": "node test/reliability/process-cleanup.test.js",
     "test:component-cache": "node test/reliability/component-cache.test.js && node test/reliability/component-concurrency.test.js && node test/reliability/component-cache-lifecycle.test.js",
