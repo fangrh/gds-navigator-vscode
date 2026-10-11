@@ -195,7 +195,7 @@
     "test:alignment:random100": "python test/alignment/generate-random-corpus.py && node test/alignment/random-corpus.test.js",
     "test:images:workflow": "node test/alignment/random-image-workflow.test.js && node test/alignment/multi-image-store.test.js",
     "test:images:vscode": "npm run compile && node test/reliability/demo-provenance.test.js && node test/reliability/vscode-lifecycle.test.js --multi-image",
-    "test:handoff": "node test/reliability/handoff-contract.test.js && node test/reliability/handoff-viewer.test.js && node test/reliability/handoff-provider.test.js && node test/reliability/demo-provenance.test.js",
+    "test:handoff": "node test/reliability/clipboard-util.test.js && node test/reliability/handoff-contract.test.js && node test/reliability/handoff-viewer.test.js && node test/reliability/handoff-provider.test.js && node test/reliability/demo-provenance.test.js",
     "test:handoff:vscode": "npm run compile && node test/reliability/demo-provenance.test.js && node test/reliability/vscode-lifecycle.test.js --handoff",
     "test:files": "node test/reliability/file-links.test.js && node test/reliability/project-store.test.js && node test/reliability/external-outputs.test.js && node test/reliability/file-management.test.js",
     "test:files:vscode": "npm run compile && node test/reliability/vscode-lifecycle.test.js --file-links",

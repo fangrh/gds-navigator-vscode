@@ -2,12 +2,12 @@ const assert=require('assert/strict'),fs=require('fs'),path=require('path'),os=r
 const root=path.resolve(__dirname,'../..'),tmp=fs.mkdtempSync(path.join(os.tmpdir(),'gds-provider-handoff-'));
 require('esbuild').buildSync({entryPoints:[path.join(root,'src/gdsEditor.ts')],bundle:true,platform:'node',external:['vscode'],outfile:path.join(tmp,'provider.js')});
 const original=Module._load;let clipboard='',writes=[],messages=[];
-const vscode={window:{createTextEditorDecorationType:()=>({}),showErrorMessage(){},setStatusBarMessage(){}},OverviewRulerLane:{Right:4},env:{clipboard:{writeText:async text=>{await new Promise(r=>setTimeout(r,15));clipboard=text;writes.push(text);},readText:async()=>clipboard}}};
+const vscode={Uri:{file:fsPath=>({fsPath})},window:{createTextEditorDecorationType:()=>({}),showErrorMessage(){},setStatusBarMessage(){}},workspace:{getWorkspaceFolder:()=>undefined},OverviewRulerLane:{Right:4},env:{clipboard:{writeText:async text=>{await new Promise(r=>setTimeout(r,15));clipboard=text;writes.push(text);},readText:async()=>clipboard}}};
 let Provider;
 try{Module._load=function(name,...args){if(name==='vscode')return vscode;if(name==='child_process')return {spawn(){throw Error('Unexpected external clipboard/process fallback in test');}};return original.call(this,name,...args);};Provider=require(path.join(tmp,'provider.js')).GdsEditorProvider;}finally{Module._load=original;}
 const geometry={type:'Polygon',coordinates:[[[0,0],[10,0],[10,6],[0,6],[0,0]]]};
 const target={provId:'target-a',layer:'4/0',bbox:[0,0,10,6],geometry,provenance:{file:'D:/demo/build.py',line:20}};
-const values=new Map();const provider=new Provider({workspaceState:{get:k=>values.get(k),update:async(k,v)=>values.set(k,v)}},{},{appendLine(){}});
+const values=new Map();const provider=new Provider({extensionUri:{fsPath:root},workspaceState:{get:k=>values.get(k),update:async(k,v)=>values.set(k,v)}},{getPython:()=> 'python'},{appendLine(){}});
 const entry=(file,hash)=>({gdsPath:file,gdsHash:hash,topCell:'DEMO',loading:false,lastSelection:[],elementCatalog:[target],panel:{webview:{postMessage:async m=>{messages.push(m);return true;}}}});
 const a=entry('D:/a/chip.gds','hash-a'),b=entry('D:/b/chip.gds','hash-b');
 const decode=text=>JSON.parse(cp.execFileSync('python',['-c','import sys,json,yaml;print(json.dumps(yaml.safe_load(sys.stdin.read())))'],{input:text,encoding:'utf8',env:{...process.env,PYTHONUTF8:'1'}}));

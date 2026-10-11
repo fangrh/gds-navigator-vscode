@@ -16,7 +16,8 @@ def make_layout():
     layout = gf.Component("agent_handoff_demo")
     for row in range(2):
         for column in range(3):
-            pad = layout << gf.components.rectangle(size=(10, 6), layer=(4, 0))
+            # Independent cells preserve each placement tag in the legacy provenance fork.
+            pad = layout << gf.components.rectangle(size=(10, 6), layer=(4, 0)).copy()
             pad.move((column * 30, row * 24))
             pad.name = f"pad_r{row}_c{column}"
     disk = layout << gf.components.circle(radius=4, layer=(8, 0))
