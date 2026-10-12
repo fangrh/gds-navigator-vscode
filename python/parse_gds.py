@@ -27,11 +27,30 @@ INSTANCE_PROP_KEY = 1005
 PROV_ID_PROP_KEY = 1002
 
 
+def _provenance_id(value):
+    """Canonical integer ID, accepting signed decimal strings but not bool/float."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        import re
+        text = value.strip()
+        if re.fullmatch(r"[+-]?[0-9]+", text):
+            try:
+                return int(text)
+            except ValueError:
+                pass
+    return None
+
+
 def _load_sidecar(gds_path):
     """Load provenance sidecar JSON for a GDS file.
 
     Returns a tuple of (entries_by_id, ports_by_component, ref_names, warnings).
-    entries_by_id: dict mapping prov_id (int) to the corresponding entry dict.
+    entries_by_id: dict mapping canonical prov_id (int) to its entry dict.
+    Integer strings are accepted; duplicate canonical IDs are excluded with a
+    warning so an ambiguous record cannot silently override another source.
     ports_by_component: dict mapping component name to list of port dicts.
     ref_names: dict mapping instance name to component name.
 
@@ -57,13 +76,20 @@ def _load_sidecar(gds_path):
         if not isinstance(entries, list):
             warnings.append("sidecar entries is not a list")
             entries = []
-        else:
-            warnings.extend(f"sidecar entry {i} is malformed" for i, entry in enumerate(entries) if not isinstance(entry, dict) or not isinstance(entry.get("id"), (str, int)))
-        entries_by_id = {
-            entry["id"]: entry
-            for entry in entries
-            if isinstance(entry, dict) and isinstance(entry.get("id"), (str, int))
-        }
+        entries_by_id = {}
+        duplicate_ids = set()
+        for index, entry in enumerate(entries):
+            prov_id = _provenance_id(entry.get("id")) if isinstance(entry, dict) else None
+            if prov_id is None:
+                warnings.append(f"sidecar entry {index} has a malformed provenance ID")
+            elif prov_id in duplicate_ids:
+                continue
+            elif prov_id in entries_by_id:
+                del entries_by_id[prov_id]
+                duplicate_ids.add(prov_id)
+                warnings.append(f"sidecar duplicate provenance ID {prov_id}: ambiguous source mapping ignored")
+            else:
+                entries_by_id[prov_id] = entry
         raw_ports = data.get("ports", {})
         if not isinstance(raw_ports, dict):
             warnings.append("sidecar ports is not an object")
@@ -274,7 +300,7 @@ def _get_feature_provenance(iterator, provenance_by_cell, sidecar_by_id, ports_b
         try:
             prov_id_raw = iterator.shape().property(PROV_ID_PROP_KEY)
             if prov_id_raw is not None:
-                prov_id = int(prov_id_raw)
+                prov_id = _provenance_id(prov_id_raw)
                 entry = sidecar_by_id.get(prov_id)
                 if entry is not None:
                     prov = _build_provenance_from_sidecar(entry, cell_name, ports_by_component)
@@ -340,7 +366,7 @@ def _get_feature_provenance(iterator, provenance_by_cell, sidecar_by_id, ports_b
             except Exception:
                 pass
         if instance_prov_id is not None:
-            placement_entry = sidecar_by_id.get(instance_prov_id)
+            placement_entry = sidecar_by_id.get(_provenance_id(instance_prov_id))
 
     # Merge loop_index from placement entry — always prefer placement over
     # creation, because cached components retain the FIRST creation's

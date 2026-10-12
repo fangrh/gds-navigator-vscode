@@ -23,7 +23,7 @@ export function findSidecar(gdsPath: string): string | null {
 }
 
 export interface SidecarEntry {
-    id?: number;
+    id?: number | string;
     file?: string;
     line?: number;
     function?: string;

@@ -54,6 +54,12 @@ requires gdsfactory; a compatible provenance-enabled fork adds source links.
   `GDS_PROVENANCE=1`) or plain `chip.json` next to the `.gds` is loaded
   automatically; provenance embedded in the GDS (TEXT layer 255/255 +
   properties) is also read.
+- Sidecar provenance IDs accept integers and signed decimal integer strings.
+  Equivalent forms such as `7` and `"007"` identify the same record. Duplicate
+  IDs are excluded from sidecar source lookup and reported as warnings; unrelated
+  records and embedded provenance remain available.
+  Run `npm run test:provenance` with `GDS_TEST_PYTHON` and `GDS_BROWSER` set
+  to check parser IDs, coverage warnings and source navigation in the browser.
 - **Click a polygon** → selection detail (file:line, bbox, instance name,
   cell, loop/array indices, call chain) is written to the **GDS Navigator
   output channel** — the same text you paste to an AI agent.
