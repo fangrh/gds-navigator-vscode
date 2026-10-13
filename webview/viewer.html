@@ -1901,7 +1901,7 @@ function updateModeIndicator(mode) {
         indicator.onclick = null;
         indicator.title = '';
     } else {
-        var trackedCount = allFeatures.filter(function(f) { var p = f.get('provenance'); return p && p.file && p.line > 0; }).length;
+        var trackedCount = allFeatures.filter(function(f) { return SourceSelection.hasPrimarySourceReference(f.get('provenance')); }).length;
         indicator.textContent = trackedCount ? 'Provenance: PARTIAL (' + trackedCount + '/' + allFeatures.length + ')' : 'Provenance: OFF — click to associate .py';
         indicator.className = 'partial';
         indicator.title = 'Source tracking is missing, incomplete, or has sidecar warnings. Click to associate the generating Python script, then rebuild with the project environment.';

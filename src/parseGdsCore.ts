@@ -2,6 +2,8 @@ import { spawn } from 'child_process';
 import * as path from 'path';
 import { findSidecar } from './sidecar';
 
+const { hasPrimarySourceReference } = require('../webview/source-selection.js') as { hasPrimarySourceReference(provenance: unknown): boolean };
+
 export interface ParseResult {
     geojson: unknown;
     mode: 'full' | 'partial';
@@ -33,7 +35,7 @@ export function parseGdsFileCore(pythonPath: string, gdsPath: string, extensionD
                 const geojson: any = JSON.parse(stdout);
                 if (geojson && geojson.error) { reject(new Error(String(geojson.error))); return; }
                 const sidecar = findSidecar(gdsPath), parserWarnings = Array.isArray(geojson?._diag?.sidecar_warnings) ? geojson._diag.sidecar_warnings.map(String) : [], warnings = [...parserWarnings];
-                const features = Array.isArray(geojson?.features) ? geojson.features : [], tracked = features.filter((f: any) => typeof f.properties?.provenance?.file === 'string' && Number.isInteger(f.properties.provenance.line) && f.properties.provenance.line > 0).length;
+                const features = Array.isArray(geojson?.features) ? geojson.features : [], tracked = features.filter((f: any) => hasPrimarySourceReference(f.properties?.provenance)).length;
                 if (sidecar && tracked < features.length) warnings.push(`Provenance covers ${tracked}/${features.length} elements. The sidecar may be stale or this generator may bypass tracking; rebuild with the saved project environment.`);
                 const mode: 'full' | 'partial' = features.length > 0 && tracked === features.length && warnings.length === 0 ? 'full' : 'partial';
                 resolve({ geojson, mode, ...(warnings.length ? { warnings } : {}) });

@@ -7,6 +7,10 @@
     function slash(value) { return (value || '').replace(/\\/g, '/'); }
     function parsedLine(value) { return typeof value === 'number' ? value : parseInt(String(value), 10); }
     function featureProvenance(feature) { return feature && typeof feature.get === 'function' ? (feature.get('provenance') || {}) : {}; }
+    function hasPrimarySourceReference(provenance) {
+        return !!provenance && typeof provenance.file === 'string' && provenance.file.trim().length > 0 &&
+            Number.isInteger(provenance.line) && provenance.line > 0;
+    }
     function create(features) {
         var list = Array.isArray(features) ? features.slice() : [];
         var directIndex = null, chainIndex = null, lineIndex = null, provenanceRefs = new Map();
@@ -67,5 +71,5 @@
             stats: function () { return Object.assign({}, counts, { sourceEntries: directIndex ? directIndex.size + chainIndex.size : 0, lineEntries: lineIndex ? lineIndex.size : 0, sourceBuilt: !!directIndex, lineBuilt: !!lineIndex }); }
         };
     }
-    return { create: create };
+    return { create: create, hasPrimarySourceReference: hasPrimarySourceReference };
 }));

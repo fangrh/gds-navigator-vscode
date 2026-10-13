@@ -60,6 +60,9 @@ requires gdsfactory; a compatible provenance-enabled fork adds source links.
   records and embedded provenance remain available.
   Run `npm run test:provenance` with `GDS_TEST_PYTHON` and `GDS_BROWSER` set
   to check parser IDs, coverage warnings and source navigation in the browser.
+- Provenance coverage counts primary references with a nonblank filename and
+  a positive integer line number. Incomplete or malformed fields remain in
+  the metadata for review and do not inflate the ON/PARTIAL coverage indicator.
 - **Click a polygon** → selection detail (file:line, bbox, instance name,
   cell, loop/array indices, call chain) is written to the **GDS Navigator
   output channel** — the same text you paste to an AI agent.

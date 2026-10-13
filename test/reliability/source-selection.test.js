@@ -44,6 +44,23 @@ function baselineLine(list, anchor) {
   return list.filter(f => { const p = f.get('provenance') || {}; return (p.file || '').replace(/\\/g, '/') === file && p.line === line; });
 }
 
+const hasPrimarySourceReference = SourceSelection.hasPrimarySourceReference;
+assert.equal(typeof hasPrimarySourceReference, 'function');
+for (const file of ['\\\\server\\share\\layout.py', '/Users/研究 project/build script.py', '  literal leading and trailing spaces.py  ']) {
+  const provenance = { file, line: 7 };
+  assert.equal(hasPrimarySourceReference(provenance), true, `valid filename rejected: ${JSON.stringify(file)}`);
+  assert.equal(provenance.file, file, 'validator must not modify the raw filename');
+}
+for (const file of [undefined, null, '', '   ', 42, true, {}]) {
+  assert.equal(hasPrimarySourceReference({ file, line: 7 }), false, `invalid filename accepted: ${JSON.stringify(file)}`);
+}
+assert.equal(hasPrimarySourceReference({ resolved_file: '/tmp/layout.py', line: 7 }), false, 'resolved-only source must not count as primary');
+for (const line of [true, false, 0, -1, 1.5, '7', NaN, Infinity, -Infinity]) {
+  assert.equal(hasPrimarySourceReference({ file: 'layout.py', line }), false, `invalid line accepted: ${String(line)}`);
+}
+assert.equal(hasPrimarySourceReference({ file: 'layout.py', line: 1 }), true);
+assert.equal(hasPrimarySourceReference({ file: 'layout.py', line: 7.0 }), true);
+
 const index = SourceSelection.create(fixtures);
 assert.deepEqual(index.bySource('C:\\work\\build.py', 20).map(f => f.ol_uid), baselineBySource(fixtures, 'C:\\work\\build.py', 20).map(f => f.ol_uid));
 assert.deepEqual(index.bySource('caller.py', 7).map(f => f.ol_uid), baselineBySource(fixtures, 'caller.py', 7).map(f => f.ol_uid));
