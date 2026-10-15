@@ -149,6 +149,7 @@ async function browserContract(validGds, duplicateGds, temp, python) {
 
 (async () => {
   // Use the same selected interpreter for the focused parser matrix and API/UI gate.
+  execFileSync(PYTHON, [path.join(ROOT, 'test', 'reliability', 'call-stack-parser.test.py')], { cwd: ROOT, stdio: 'inherit' });
   execFileSync(PYTHON, [path.join(ROOT, 'test', 'reliability', 'sidecar-id-parser.test.py')], { cwd: ROOT, stdio: 'inherit' });
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'gds-sidecar-id-contract-'));
   const bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gds-sidecar-id-bundle-'));

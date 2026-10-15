@@ -9,6 +9,7 @@ import json
 import sys
 import os
 import math
+import re
 
 _DBG = False  # set to True to log array-index diagnostics
 _DBG_LOG: list = []
@@ -25,6 +26,7 @@ PROVENANCE_LAYER = (255, 255)
 PLACEMENT_PROP_KEY = 1004
 INSTANCE_PROP_KEY = 1005
 PROV_ID_PROP_KEY = 1002
+_CALL_STACK_PATTERN = re.compile(r"^(.+?):(\d+)\s+in\s+(.+)$")
 
 
 def _provenance_id(value):
@@ -135,15 +137,12 @@ def _valid_port_record(port):
 
 
 def _parse_call_stack_string(frame_str):
-    """Parse a call-stack frame string into a structured dict.
+    """Parse a frame string, returning an independent dict or None.
 
-    Accepts strings like ``"user_script.py:10 in make_top"`` and returns
-    ``{"file": "user_script.py", "line": 10, "function": "make_top"}``.
-    Returns ``None`` if the string does not match the expected pattern.
+    Reuse the compiled expression without retaining frame inputs or results.
+    Directory resolution stays with each caller.
     """
-    import re as _re
-
-    m = _re.match(r"^(.+?):(\d+)\s+in\s+(.+)$", frame_str)
+    m = _CALL_STACK_PATTERN.match(frame_str)
     if not m:
         return None
     return {"file": m.group(1), "line": int(m.group(2)), "function": m.group(3)}
