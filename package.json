@@ -164,7 +164,7 @@
     "project:verify": "node scripts/verify-project.cjs run",
     "project:status": "node scripts/verify-project.cjs status",
     "test:project-verification": "node test/reliability/project-verification.test.js",
-    "test:provenance": "node test/reliability/provenance-contract.test.js && node test/reliability/sidecar-id-contract.test.js && node test/reliability/provenance-coverage.test.js",
+    "test:provenance": "node test/reliability/provenance-contract.test.js && node test/reliability/sidecar-id-contract.test.js && node test/reliability/provenance-coverage.test.js && node test/reliability/placement-call-stack-contract.test.js",
     "vscode:prepublish": "npm run package",
     "compile": "npm run build:webview && node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",

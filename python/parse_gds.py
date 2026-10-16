@@ -148,12 +148,8 @@ def _parse_call_stack_string(frame_str):
     return {"file": m.group(1), "line": int(m.group(2)), "function": m.group(3)}
 
 
-def _build_provenance_from_sidecar(entry, cell_name, ports_by_component=None):
-    """Build a provenance dict from a sidecar entry and cell name.
-
-    Returns a dict with keys: file, line, function, call_chain, cell,
-    and optionally source_text and ports.
-    """
+def _build_call_chain_from_sidecar(entry):
+    """Build a fresh chain, ignoring malformed optional sidecar frames."""
     primary_file = entry.get("file") if isinstance(entry.get("file"), str) else ""
     primary_dir = os.path.dirname(primary_file) if primary_file else ""
 
@@ -172,8 +168,19 @@ def _build_provenance_from_sidecar(entry, cell_name, ports_by_component=None):
                 parsed = {**parsed, "file": os.path.join(primary_dir, parsed["file"])}
             call_chain.append(parsed)
 
+    return call_chain
+
+
+def _build_provenance_from_sidecar(entry, cell_name, ports_by_component=None):
+    """Build a provenance dict from a sidecar entry and cell name.
+
+    Returns a dict with keys: file, line, function, call_chain, cell,
+    and optionally source_text and ports.
+    """
+    call_chain = _build_call_chain_from_sidecar(entry)
+
     prov = {
-        "file": primary_file,
+        "file": call_chain[0]["file"],
         "line": entry.get("line"),
         "function": entry.get("function", ""),
         "call_chain": call_chain,
@@ -403,17 +410,7 @@ def _get_feature_provenance(iterator, provenance_by_cell, sidecar_by_id, ports_b
 
     # Also rebuild call_chain from placement entry when available.
     if placement_entry:
-        primary_file = placement_entry.get("file", "")
-        primary_dir = os.path.dirname(primary_file) if primary_file else ""
-        new_chain = [{"file": primary_file, "line": placement_entry.get("line"), "function": placement_entry.get("function", "")}]
-        for frame_str in placement_entry.get("call_stack", []):
-            parsed = _parse_call_stack_string(frame_str)
-            if parsed is not None:
-                if primary_dir and not os.path.isabs(parsed["file"]):
-                    parsed = {**parsed, "file": os.path.join(primary_dir, parsed["file"])}
-                new_chain.append(parsed)
-        if new_chain:
-            prov["call_chain"] = new_chain
+        prov["call_chain"] = _build_call_chain_from_sidecar(placement_entry)
 
     # Extract instance name from placement entry's instance_path
     if not instance_name and placement_entry:
