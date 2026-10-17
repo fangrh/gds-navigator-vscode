@@ -232,18 +232,20 @@ def _extract_provenance(layout):
     return prov
 
 
-def _polygon_metadata(ring):
+def _polygon_metadata_and_bounds(ring):
+    """Return display metadata and unrounded extrema for the layout bounds."""
     xs = [p[0] for p in ring]
     ys = [p[1] for p in ring]
     area = 0.5 * abs(sum(
         xs[i] * ys[i + 1] - xs[i + 1] * ys[i]
         for i in range(len(ring) - 1)
     ))
+    bounds = [min(xs), min(ys), max(xs), max(ys)]
     return {
         "area_um2": round(area, 4),
         "vertex_count": len(ring) - 1,
-        "bbox": [round(min(xs), 6), round(min(ys), 6), round(max(xs), 6), round(max(ys), 6)],
-    }
+        "bbox": [round(value, 6) for value in bounds],
+    }, bounds
 
 
 def _parse_json_property(value):
@@ -541,11 +543,12 @@ def parse_gds(filepath: str) -> dict:
         while not it.at_end():
             ring = _shape_to_ring(it.shape(), it.itrans(), layout.dbu)
             if ring is not None:
+                metadata, bounds = _polygon_metadata_and_bounds(ring)
                 properties = {
                     "layer": info.layer,
                     "data_type": info.datatype,
                     "color": color,
-                    **_polygon_metadata(ring),
+                    **metadata,
                 }
                 provenance = _get_feature_provenance(it, provenance_by_cell, sidecar_by_id, ports_by_component, ref_names)
                 if provenance:
@@ -560,11 +563,10 @@ def parse_gds(filepath: str) -> dict:
                     "geometry": {"type": "Polygon", "coordinates": [ring]},
                     "properties": properties,
                 })
-                for x, y in ring:
-                    min_x = min(min_x, x)
-                    max_x = max(max_x, x)
-                    min_y = min(min_y, y)
-                    max_y = max(max_y, y)
+                min_x = min(min_x, bounds[0])
+                min_y = min(min_y, bounds[1])
+                max_x = max(max_x, bounds[2])
+                max_y = max(max_y, bounds[3])
             it.next()
 
     # Flush array-index diagnostics to a JSON log file next to the GDS.
