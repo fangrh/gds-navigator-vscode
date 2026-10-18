@@ -14,12 +14,25 @@ Hiding a layer removes hidden features from selection and suppresses their
 highlight; showing it again does not restore the removed selection. Enter and
 Space on a layer checkbox cannot finish a route. Reload rebuilds the index.
 
+Imported GDS ports follow the visibility of their layer's legend row. Hiding a
+layer removes its selected ports and suppresses their markers and hit targets;
+showing it restores the same markers and source metadata without restoring
+selection. The port count still reports the total number of known ports, and
+the global port/name switches remain independent controls. A port on a layer
+with no imported geometry stays visible because the legend has no row for it.
+
+Placed factory components and their ports are proposal annotations with
+independent display rules. Their target-layer metadata does not add them to
+the imported GDS layer index. Ordinary drawings also remain separate from
+imported layer toggles. Reload clears document-scoped layer visibility.
+
 The browser fixture contains 3,000 features across three layers. Each toggle
 writes visibility on 1,000 features with zero layer-key scans, retaining feature
 identity and exact coordinates. This is an operation-count result; whole-frame
 rendering cost and large-layout latency still depend on the layout and machine.
 
 Focused evidence: `test/reliability/layers-viewer.test.js`,
+`test/reliability/layer-ports-viewer.test.js`,
 `test/reliability/component-chooser.test.js` and
 `test/reliability/component-catalog-viewer.test.js`. The managed release profile
 includes these regressions.

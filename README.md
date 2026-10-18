@@ -47,6 +47,8 @@ requires gdsfactory; a compatible provenance-enabled fork adds source links.
   be selected. Ports require valid coordinates from the provenance sidecar;
   placed factory components also show ports while their geometry remains a
   rigid translation or rotation of the source component.
+  Imported port markers follow their GDS layer's visibility. Showing the layer
+  restores its markers without restoring their previous selection.
 
 ### Provenance-aware source navigation
 - **Automatic sidecar detection** — `chip.provenance.json` (written by the

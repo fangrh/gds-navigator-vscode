@@ -352,6 +352,7 @@ var allFeatures = [];
 var layerColors = {};
 var featuresByLayer = new Map();
 var layoutPortRecords = [];
+var hiddenLayoutLayers = new Set(), layoutPortFeaturesByLayer = new Map();
 var portsVisible = vscode?.getState?.()?.portsVisible !== false;
 var portNamesVisible = vscode?.getState?.()?.portNamesVisible !== false;
 
@@ -415,6 +416,7 @@ var portLayer = new ol.layer.Vector({
     zIndex: 20,
     visible: portsVisible,
     style: function(feature) {
+        if (feature.get('visible') === false) return null;
         var port = feature.get('port'), selected = !!feature.get('selected');
         return portStyleCache(['port', selected, portNamesVisible ? port.name : ''], function() {
             return new ol.style.Style({
@@ -429,12 +431,21 @@ var portLayer = new ol.layer.Vector({
 });
 var portFeatureById = new Map(), portRefreshFrame = null;
 var factoryPortProjector = PortOverlay.factoryPortProjector();
+function setLayoutPortLayerVisibility(key, visible) {
+    if (visible) hiddenLayoutLayers.delete(key);
+    else hiddenLayoutLayers.add(key);
+    (layoutPortFeaturesByLayer.get(key) || []).forEach(function(feature) {
+        feature.set('visible', visible);
+    });
+}
 function refreshPortOverlay() {
     var records = layoutPortRecords.concat(factoryPortProjector.ports());
     var nextIds = new Set();
+    layoutPortFeaturesByLayer.clear();
     records.forEach(function(port) {
         if (!Array.isArray(port.center) || !port.center.every(Number.isFinite) || nextIds.has(port.id)) return;
         nextIds.add(port.id);
+        var key = Array.isArray(port.layer) ? port.layer.join('/') : String(port.layer || '');
         var feature = portFeatureById.get(port.id);
         if (feature) {
             var oldCenter = feature.getGeometry().getCoordinates();
@@ -445,11 +456,17 @@ function refreshPortOverlay() {
             feature = new ol.Feature({geometry:new ol.geom.Point(port.center)});
             feature.set('elementId', port.id);
             feature.set('port', port);
-            feature.set('layer', Array.isArray(port.layer) ? port.layer.join('/') : String(port.layer || ''));
+            feature.set('layer', key);
             feature.set('selected', false);
             feature.set('provenance', port.provenance || {});
             portFeatureById.set(port.id, feature);
             portSource.addFeature(feature);
+        }
+        feature.set('visible', port.source !== 'gds' || !hiddenLayoutLayers.has(key));
+        if (port.source === 'gds') {
+            var layerPorts = layoutPortFeaturesByLayer.get(key);
+            if (!layerPorts) { layerPorts = []; layoutPortFeaturesByLayer.set(key, layerPorts); }
+            layerPorts.push(feature);
         }
     });
     var removedSelected = false;
@@ -1813,6 +1830,8 @@ function loadGdsData(geojson, gdsPath, pythonFile, annotations, mode) {
         selectedFeatures.clear();
         portSource.clear();
         portFeatureById.clear();
+        hiddenLayoutLayers.clear();
+        layoutPortFeaturesByLayer.clear();
         layoutPortRecords = PortOverlay.layoutPorts(geojson);
         allFeatures = [];
         layerColors = {};
@@ -2026,6 +2045,7 @@ function buildLegend() {
             row.setAttribute('aria-checked',String(!hidden));
             usageEvent('ui.control',{phase:'intent',control:'layer.visibility'});
             layerFeatures.forEach(function(f) { f.set('visible', !hidden); });
+            setLayoutPortLayerVisibility(key, !hidden);
             if(hidden){
                 var remaining=selectedFeatures.getArray().filter(function(f){return f.get('visible')!==false;});
                 if(remaining.length!==selectedFeatures.getLength()){replaceSelection(remaining);onSelectionChanged();}
