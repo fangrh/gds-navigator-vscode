@@ -623,7 +623,8 @@ function removeFromSelection(features) {
 function replaceSelection(features) {
     features=expandFactorySelection(features).filter(function(f){return f.get('visible')!==false;});
     if(features.length&&typeof imageCanvasSelected!=='undefined')imageCanvasSelected=false;
-    selectedFeatures.forEach(function(f) { f.set('selected', false); });
+    var nextSet = features.length && selectedFeatures.getLength() ? new Set(features) : null;
+    selectedFeatures.forEach(function(f) { if (!nextSet || !nextSet.has(f)) f.set('selected', false); });
     selectedFeatures.clear();
     features.forEach(function(f) {
         selectedFeatures.push(f);
