@@ -4,7 +4,7 @@
     if (root) root.SourceSelection = api;
 }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
     'use strict';
-    function slash(value) { return (value || '').replace(/\\/g, '/'); }
+    function slash(value) { return typeof value === 'string' ? value.replace(/\\/g, '/') : ''; }
     function parsedLine(value) { return typeof value === 'number' ? value : parseInt(String(value), 10); }
     function featureProvenance(feature) { return feature && typeof feature.get === 'function' ? (feature.get('provenance') || {}) : {}; }
     function hasPrimarySourceReference(provenance) {
@@ -29,7 +29,7 @@
                 var feature = list[i], p = featureProvenance(feature), line = parsedLine(p.line);
                 provenanceRefs.set(feature, feature.get('provenance')); counts.buildInspections++;
                 if (!Number.isNaN(line)) bucket(directIndex, slash(p.resolved_file || p.file || '').toLowerCase(), line, true).push(feature);
-                var chain = p.call_chain || [];
+                var chain = Array.isArray(p.call_chain) ? p.call_chain : [];
                 for (var j = 0; j < chain.length; j++) {
                     var cc = chain[j] || {}, ccLine = parsedLine(cc.line);
                     if (Number.isNaN(ccLine)) continue;

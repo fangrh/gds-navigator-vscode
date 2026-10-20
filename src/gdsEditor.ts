@@ -71,13 +71,15 @@ function normalizeCallChain(prov: Record<string, unknown>): Array<{ file: string
     const chain = prov.call_chain;
     const stack = prov.call_stack;
     if (Array.isArray(chain)) {
-        entries = (chain as Array<Record<string, unknown>>).map((cc) => ({
+        entries = chain.filter((cc): cc is Record<string, unknown> =>
+            !!cc && typeof cc === 'object' && !Array.isArray(cc) && (cc.file == null || typeof cc.file === 'string')
+        ).map((cc) => ({
             file: String(cc.file || ''),
             line: parseInt(String(cc.line), 10) || 0,
             function: String(cc.function || ''),
         }));
     } else if (Array.isArray(stack)) {
-        entries = (stack as string[]).map((cs) => {
+        entries = stack.filter((cs): cs is string => typeof cs === 'string').map((cs) => {
             const m = cs.match(/^(.+?):(\d+)\s+in\s+(.+)$/);
             return m ? { file: m[1], line: parseInt(m[2], 10), function: m[3] } : { file: cs, line: 0, function: '' };
         });

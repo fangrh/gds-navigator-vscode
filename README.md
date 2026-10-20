@@ -68,6 +68,8 @@ requires gdsfactory; a compatible provenance-enabled fork adds source links.
   the metadata for review and do not inflate the ON/PARTIAL coverage indicator.
 - Malformed optional call-stack frames are skipped so the layout can still
   open with its valid source links, placement details and remaining frames.
+  Malformed optional call-chain entries also leave source selection and
+  selection logging usable, with raw provenance preserved for review.
 - **Click a polygon** → selection detail (file:line, bbox, instance name,
   cell, loop/array indices, call chain) is written to the **GDS Navigator
   output channel** — the same text you paste to an AI agent.

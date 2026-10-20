@@ -62,6 +62,26 @@ assert.equal(hasPrimarySourceReference({ file: 'layout.py', line: 1 }), true);
 assert.equal(hasPrimarySourceReference({ file: 'layout.py', line: 7.0 }), true);
 
 const index = SourceSelection.create(fixtures);
+const mixedProvenance = { file: 'build.py', line: 20, call_chain: [
+  null, 'not-an-object-frame', { file: 42, line: 7 },
+  { file: 'caller.py', line: '7' }, { resolved_file: 'C:\\work\\helper.py', line: 12 }
+] };
+const rawMixed = JSON.stringify(mixedProvenance);
+const malformed = SourceSelection.create([
+  feature('mixed', mixedProvenance),
+  feature('after', { file: 'after.py', line: 9, call_chain: { 0: { file: 'not-a-chain.py', line: 8 }, length: 1 } }),
+  feature('invalid-path', { file: 42, line: 20 })
+]);
+assert.deepEqual(malformed.bySource('build.py', 20).map(f => f.ol_uid), ['mixed']);
+assert.deepEqual(malformed.bySource('CALLER.PY', 7).map(f => f.ol_uid), ['mixed']);
+assert.deepEqual(malformed.bySource('C:/work/helper.py', 12).map(f => f.ol_uid), ['mixed']);
+assert.deepEqual(malformed.bySource('after.py', 9).map(f => f.ol_uid), ['after']);
+assert.deepEqual(malformed.bySource('42', 7), []);
+assert.deepEqual(malformed.bySource('42', 20), []);
+assert.deepEqual(malformed.bySource('not-a-chain.py', 8), []);
+assert.deepEqual(malformed.bySource(42, 20), []);
+assert.deepEqual(malformed.lineGroup({ file: 42, line: 20 }), []);
+assert.equal(JSON.stringify(mixedProvenance), rawMixed, 'source lookup rewrote optional metadata');
 assert.deepEqual(index.bySource('C:\\work\\build.py', 20).map(f => f.ol_uid), baselineBySource(fixtures, 'C:\\work\\build.py', 20).map(f => f.ol_uid));
 assert.deepEqual(index.bySource('caller.py', 7).map(f => f.ol_uid), baselineBySource(fixtures, 'caller.py', 7).map(f => f.ol_uid));
 assert.deepEqual(index.bySource('build.py', 20).map(f => f.ol_uid), baselineBySource(fixtures, 'build.py', 20).map(f => f.ol_uid));

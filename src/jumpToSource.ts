@@ -15,7 +15,7 @@ const highlightType = vscode.window.createTextEditorDecorationType({
 export async function openSource(rawFile: string, rawLine: number, gdsPath?: string): Promise<void> {
     const parsedLine = Number(rawLine);
     const line = Number.isInteger(parsedLine) && parsedLine > 0 ? parsedLine : 0;
-    const file = (rawFile || '').replace(/\\/g, '/');
+    const file = typeof rawFile === 'string' ? rawFile.replace(/\\/g, '/') : '';
 
     const candidates: string[] = [];
     const basename = path.basename(file);
