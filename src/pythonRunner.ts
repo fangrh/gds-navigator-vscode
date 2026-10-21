@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { spawn } from 'child_process';
+import { spawnPythonProcess } from './pythonProcess';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -124,18 +124,19 @@ export function runPythonScript(
     output: vscode.OutputChannel,
     options: RunOptions = {}
 ): Promise<RunResult> {
+    if (options.signal?.aborted) return Promise.resolve({ ok: false, reason: 'Python build cancelled' });
     return new Promise((resolve) => {
         const timeoutMs = Number.isFinite(options.timeoutMs) && (options.timeoutMs || 0) > 0 ? options.timeoutMs! : 15 * 60 * 1000;
         const maxOutputBytes = Number.isFinite(options.maxOutputBytes) && (options.maxOutputBytes || 0) > 0 ? options.maxOutputBytes! : 8 * 1024 * 1024;
         let before = new Map<string, string>();
         let settled = false;
         let timer: NodeJS.Timeout | undefined;
-        let terminationTimer: NodeJS.Timeout | undefined;
         let terminationResult: RunResult | undefined;
+        let cleanupSafe = true;
         let removeAbort = () => {};
         let auditDir: string | undefined;
         let auditFile: string | undefined;
-        const finish = (result: RunResult) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); if (terminationTimer) clearTimeout(terminationTimer); removeAbort(); if (auditDir) void fs.promises.rm(auditDir, { recursive: true, force: true }).catch(() => {}); resolve(result); };
+        const finish = (result: RunResult) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); removeAbort(); if (auditDir && cleanupSafe) void fs.promises.rm(auditDir, { recursive: true, force: true }).catch(() => {}); resolve(result); };
         const snapshot = async () => {
             before = await snapshotGds(cwd);
             auditDir = await fs.promises.mkdtemp(path.join(require('os').tmpdir(), 'gds-nav-audit-'));
@@ -146,20 +147,30 @@ export function runPythonScript(
         output.show(true);
         output.appendLine(`> ${pythonPath} ${scriptPath}  (GDS_PROVENANCE=1, cwd: ${cwd})`);
 
-        const proc = spawn(pythonPath, ['-c', RUN_WRAPPER, scriptPath], {
+        const child = spawnPythonProcess(pythonPath, ['-c', RUN_WRAPPER, scriptPath], {
             cwd,
             env: { ...process.env, GDS_PROVENANCE: '1', GDS_NAV_AUDIT_FILE: auditFile },
-            windowsHide: true,
         });
+        const { proc } = child;
         output.appendLine(`[run] spawn pid pending: ${pythonPath} (cwd: ${cwd})`);
         proc.on('spawn', () => output.appendLine(`[run] started, pid ${proc.pid}`));
         proc.on('error', (err) => output.appendLine(`[run] spawn error: ${err.message}`));
 
         let outputBytes = 0;
-        const terminate = () => { if (process.platform === 'win32' && proc.pid) spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true }); else proc.kill(); };
-        const requestTermination = (result: RunResult) => { if (settled || terminationResult) return; terminationResult = result; terminate(); terminationTimer = setTimeout(() => finish(result), 2000); };
+        const requestTermination = (result: RunResult) => {
+            if (settled || terminationResult) return;
+            terminationResult = result;
+            if (timer) clearTimeout(timer);
+            removeAbort();
+            void child.terminate().then(() => finish(result), error => {
+                cleanupSafe = false;
+                output.appendLine(`[run] shutdown could not be verified; audit retained at ${auditDir}`);
+                finish({ ...result, reason: `${result.reason}; ${error.message}` });
+            });
+        };
         const overflow = () => { output.appendLine('[run] output limit exceeded; terminating Python'); requestTermination({ ok: false, reason: 'Python output exceeded the configured limit' }); };
         proc.stdout.on('data', (d: Buffer) => {
+            if (settled || terminationResult) return;
             outputBytes += d.byteLength; if (outputBytes > maxOutputBytes) { overflow(); return; }
             for (const line of d.toString().split('\n')) {
                 if (line.trim()) {
@@ -169,6 +180,7 @@ export function runPythonScript(
         });
         let stderrTail = '';
         proc.stderr.on('data', (d: Buffer) => {
+            if (settled || terminationResult) return;
             outputBytes += d.byteLength; if (outputBytes > maxOutputBytes) { overflow(); return; }
             const text = d.toString();
             stderrTail = (stderrTail + text).slice(-2000);
@@ -187,11 +199,11 @@ export function runPythonScript(
 
         timer = setTimeout(() => { output.appendLine(`[run] timed out after ${timeoutMs} ms`); requestTermination({ ok: false, reason: `Python build timed out after ${Math.round(timeoutMs / 1000)}s` }); }, timeoutMs);
         const abort = () => requestTermination({ ok: false, reason: 'Python build cancelled' });
-        if (options.signal) { removeAbort = () => options.signal!.removeEventListener('abort', abort); if (options.signal.aborted) abort(); else options.signal.addEventListener('abort', abort, { once: true }); }
+        if (options.signal) { removeAbort = () => options.signal!.removeEventListener('abort', abort); options.signal.addEventListener('abort', abort, { once: true }); if (options.signal.aborted) abort(); }
 
         proc.on('close', async (code) => {
             output.appendLine(`[run] exited with code ${code}`);
-            if (terminationResult) { finish(terminationResult); return; }
+            if (settled || terminationResult) return;
             if (code !== 0) {
                 output.appendLine(`Script exited with code ${code}`);
                 const missing = stderrTail.match(/ModuleNotFoundError: No module named ['"]([^'"\r\n]+)['"]/);
@@ -206,13 +218,14 @@ export function runPythonScript(
             }
             try {
                 const changed = await findAuditedChangedGds(cwd, before, auditFile);
+                if (settled || terminationResult) return;
                 if (changed.length !== 1) {
                     const reason = changed.length === 0 ? 'Python build produced no new or modified GDS file' : `Python build produced multiple GDS files (${changed.length}); choose an explicit output`;
                     finish({ ok: false, reason, candidates: changed });
                     return;
                 }
                 finish({ ok: true, gdsPath: changed[0], candidates: changed });
-            } catch (err: any) { finish({ ok: false, reason: `Could not inspect build outputs: ${err?.message || err}` }); }
+            } catch (err: any) { if (!terminationResult) finish({ ok: false, reason: `Could not inspect build outputs: ${err?.message || err}` }); }
         });
         }).catch((err) => finish({ ok: false, reason: `Could not inspect build outputs: ${err.message}` }));
     });

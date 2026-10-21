@@ -19,7 +19,7 @@ const { findChangedGds, runPythonScript } = require(path.join(bundleDir, 'python
 Module._load = originalLoad;
 
 (async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gds-nav-build-'));
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'gds-nav-build-')));
   try {
     fs.writeFileSync(path.join(dir, 'stale.gds'), 'old');
     const before = await findChangedGds(dir, new Map([[path.resolve(dir, 'stale.gds'), `${3}:${fs.statSync(path.join(dir, 'stale.gds')).mtimeMs}`]]));
@@ -30,7 +30,9 @@ Module._load = originalLoad;
     fs.writeFileSync(path.join(dir, 'other.gds'), 'other');
     const many = await findChangedGds(dir, new Map([[path.resolve(dir, 'stale.gds'), `${3}:${fs.statSync(path.join(dir, 'stale.gds')).mtimeMs}`]]));
     assert.equal(many.length, 2, 'multiple changed outputs must remain observable for the caller to reject');
-    const python = path.join(ROOT, '.venv-fork', 'Scripts', 'python.exe');
+    const override = (process.env.GDS_TEST_PYTHON || process.env.GDS_PYTHON || '').trim();
+    const python = override ? path.resolve(override) : path.join(ROOT, '.venv-fork', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+    if (override) assert(fs.existsSync(python), `Requested test interpreter does not exist: ${python}`);
     if (fs.existsSync(python)) {
       const output = { show() {}, appendLine() {} };
       fs.writeFileSync(path.join(dir,'missing.py'),'import gds_test_dependency_that_does_not_exist');
@@ -59,7 +61,7 @@ Module._load = originalLoad;
     }
     console.log(JSON.stringify({ status: 'passed', stale: 0, single: 1, multiple: many.length, runContract: fs.existsSync(python) }));
   } finally {
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    try { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(bundleDir, {recursive:true,force:true}); } catch { /* child termination may settle slightly later */ }
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(bundleDir, {recursive:true,force:true});
   }
 })().catch((error) => { console.error(error.stack); process.exitCode = 1; });

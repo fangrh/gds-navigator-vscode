@@ -253,6 +253,13 @@ npm run compile      # dist/extension.js + media/ol.js|ol.css (esbuild)
 
 Press **F5** in VS Code to launch the Extension Development Host.
 
+Run `npm run test:python` to check build output detection and Python shutdown.
+Set `GDS_TEST_PYTHON` to an interpreter path, or use the platform's `.venv-fork`
+interpreter. Cancellation, timeouts and output limits wait for process exit;
+macOS/Linux invocations use an owned process group with bounded signal
+escalation, and Windows uses `taskkill /T /F` with checked errors. Processes
+that deliberately leave the invocation's group require separate ownership.
+
 Guided/automatic routing uses a bundled Rust/Wasm collision kernel and spatial
 index. Normal builds need no Rust installation; `npm run build:rust` regenerates
 the committed artifact after Rust source changes. See
