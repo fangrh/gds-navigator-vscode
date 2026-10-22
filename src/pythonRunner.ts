@@ -279,7 +279,22 @@ async function findAuditedChangedGds(dir: string, before: Map<string, string>, a
         }
     }
     const existing: string[] = [];
-    for (const candidate of candidates) { try { if ((await fs.promises.stat(candidate)).isFile()) existing.push(candidate); } catch { /* disappeared output */ } }
+    const identities = new Set<string>();
+    for (const candidate of candidates) {
+        try {
+            if (!(await fs.promises.stat(candidate)).isFile()) continue;
+            let identity = candidate;
+            if (candidates.size > 1) {
+                try { identity = await fs.promises.realpath(candidate); }
+                catch { /* Keep stat-confirmed outputs if canonicalization is unavailable. */ }
+            }
+            // Workspace snapshots precede audit paths. Keep their spelling so
+            // the editor can refresh an existing viewer opened through an alias.
+            if (identities.has(identity)) continue;
+            identities.add(identity);
+            existing.push(candidate);
+        } catch { /* disappeared output */ }
+    }
     return existing.sort();
 }
 

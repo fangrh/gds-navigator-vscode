@@ -88,7 +88,7 @@ requires gdsfactory; a compatible provenance-enabled fork adds source links.
   auto-refreshes the viewer. The **no-sidecar flow**: open a GDS without
   provenance → click the *Provenance: OFF* indicator → appoint a `.py` →
   it is executed and the sidecar is generated.
-- Builds detect only new or modified GDS outputs, report no output, and offer a choice for multiple outputs. Cancel a running build from its VS Code notification. Environment diagnostics include module origins and fork revision/dirty status.
+- Builds detect only new or modified GDS outputs, report no output, and offer a choice for multiple outputs. Aliases through symlinks or directory junctions count as one output and keep the workspace path when available. Cancel a running build from its VS Code notification. Environment diagnostics include module origins and fork revision/dirty status.
 - **Python environment** — automatically prefers the installed provenance-enabled
   fork. Click the status bar or use `GDS: Select Python Environment` for a manual
   choice or to return to Automatic.
