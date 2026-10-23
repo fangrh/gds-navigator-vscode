@@ -11,6 +11,7 @@ const TAG = '$projectRelative';
 const KEY_TAG = '@projectRelative/';
 const PATH_FIELDS = new Set(['gdsPath', 'imagePath', 'file', 'documentPath', 'script', 'gds', 'outputs']);
 const FOLDED_DOCUMENT_KEYS = new Set(['gdsnavigator.assoc', 'gdsnavigator.annotations.v1', 'gdsnavigator.alignment']);
+const KEY_CONFLICT = 'GDS Navigator project store contains conflicting project-relative keys';
 
 function isAbsoluteAny(value: string): boolean {
     return path.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\');
@@ -67,10 +68,14 @@ function encodeObjectKey(key: string, root: string, witness?: string): string {
 }
 
 function encodeLinkMap(value: Record<string, unknown>, root: string, pathField: 'script' | 'gds'): DiskValue {
-    return Object.fromEntries(Object.entries(value).map(([key, record]) => {
+    const encoded = new Map<string, DiskValue>();
+    for (const [key, record] of Object.entries(value)) {
         const witness = record && typeof record === 'object' && !Array.isArray(record) ? (record as Record<string, unknown>)[pathField] : undefined;
-        return [encodeObjectKey(key, root, typeof witness === 'string' ? witness : undefined), encode(record, root, key)];
-    }));
+        const encodedKey = encodeObjectKey(key, root, typeof witness === 'string' ? witness : undefined);
+        if (encoded.has(encodedKey)) throw new Error(KEY_CONFLICT);
+        encoded.set(encodedKey, encode(record, root, key));
+    }
+    return Object.fromEntries(encoded);
 }
 
 function decodeObjectKey(key: string, root: string): string {
@@ -117,9 +122,10 @@ export class ProjectStore {
         }
         // Legacy values are copied into the new document on the first update,
         // while remaining available immediately and never being deleted.
+        const diskKeys = new Set([...this.values.keys()].map(key => key.toLowerCase()));
         const legacyKeys = typeof this.legacy.keys === 'function' ? this.legacy.keys() : (this.legacy.keys || []);
         for (const key of legacyKeys) {
-            if (!key.startsWith(PREFIX) || this.values.has(key)) continue;
+            if (!key.startsWith(PREFIX) || this.values.has(key) || diskKeys.has(key.toLowerCase())) continue;
             const legacyValue = this.legacy.get(key, undefined);
             if (legacyValue !== undefined) this.values.set(key, legacyValue);
         }
@@ -151,7 +157,11 @@ export class ProjectStore {
             const observed = await this.fingerprint(this.filePath!);
             if (observed !== this.diskFingerprint) throw new Error('GDS Navigator project store changed externally; reload before writing.');
             const entries: Record<string, unknown> = {};
-            for (const [entryKey, entryValue] of next) entries[this.encodeKey(entryKey)] = encode(entryValue, this.root!, this.valueField(entryKey), entryKey.toLowerCase() === 'gdsnavigator.filelinks.v1');
+            for (const [entryKey, entryValue] of next) {
+                const encodedKey = this.encodeKey(entryKey);
+                if (Object.prototype.hasOwnProperty.call(entries, encodedKey)) throw new Error(KEY_CONFLICT);
+                entries[encodedKey] = encode(entryValue, this.root!, this.valueField(entryKey), entryKey.toLowerCase() === 'gdsnavigator.filelinks.v1');
+            }
             const payload = JSON.stringify({ version: STORE_VERSION, entries }, null, 2) + '\n';
             const dir = path.dirname(this.filePath!);
             await fs.promises.mkdir(dir, { recursive: true });
