@@ -364,7 +364,7 @@ green electrode agrees with the supplied GDS electrode.
 
 ### Connected project files
 
-GDS Navigator keeps a readable, versioned `.gds-navigator/project.json` in the first VS Code workspace folder. It records generating-script links and saved viewer annotations/image placement. Existing workspace state is copied on the first save and retained as a migration fallback. Internal file paths are stored relative to the project; images and GDS files remain separate source files. External files retain absolute paths, so moving the project does not copy them.
+GDS Navigator keeps a readable, versioned `.gds-navigator/project.json` in the first VS Code workspace folder. It records generating-script links and saved viewer annotations/image placement. Existing workspace state is copied on the first save and retained as a migration fallback. Internal file paths are stored relative to the project; images and GDS files remain separate source files. New saves keep script associations, drawings and image state linked when the entire project folder is moved, including projects whose names contain mixed-case or Unicode characters. External files retain absolute paths, so moving the project does not copy them.
 
 - Run a Python file with **GDS: Run Python Script (Build GDS)**, including from the Explorer context menu. A single detected output opens automatically; several outputs prompt for a choice and all are linked to the builder.
 - In the viewer, **Open Python** opens the linked generating script. **Related files** lists the builder, recorded outputs, provenance sidecar and inserted images with their full paths.

@@ -10,12 +10,28 @@ const PREFIX = 'gdsNavigator.';
 const TAG = '$projectRelative';
 const KEY_TAG = '@projectRelative/';
 const PATH_FIELDS = new Set(['gdsPath', 'imagePath', 'file', 'documentPath', 'script', 'gds', 'outputs']);
+const FOLDED_DOCUMENT_KEYS = new Set(['gdsnavigator.assoc', 'gdsnavigator.annotations.v1', 'gdsnavigator.alignment']);
 
 function isAbsoluteAny(value: string): boolean {
     return path.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\');
 }
 
-function encode(value: DiskValue, root: string, field?: string): DiskValue {
+function relativeKeyPath(root: string, candidate: string, allowFolded = false): string | undefined {
+    const absolute = path.resolve(candidate), rel = path.relative(root, absolute);
+    if (rel && rel !== '..' && !rel.startsWith(`..${path.sep}`)) return rel;
+    if (!allowFolded || !path.isAbsolute(candidate)) return undefined;
+    const resolvedRoot = path.resolve(root);
+    const rootAnchor = path.parse(resolvedRoot).root, candidateAnchor = path.parse(absolute).root;
+    if (rootAnchor.toLowerCase() !== candidateAnchor.toLowerCase()) return undefined;
+    const rootParts = resolvedRoot.slice(rootAnchor.length).split(path.sep).filter(Boolean);
+    const candidateParts = absolute.slice(candidateAnchor.length).split(path.sep).filter(Boolean);
+    if (candidateParts.length <= rootParts.length || !rootParts.every((part, i) => part.toLowerCase() === candidateParts[i].toLowerCase())) return undefined;
+    // Compare components, then retain the original tail. Unicode lowercasing
+    // can change string length, so slicing by a folded prefix is unsafe.
+    return candidateParts.slice(rootParts.length).join(path.sep);
+}
+
+function encode(value: DiskValue, root: string, field?: string, fileLinks = false): DiskValue {
     if (typeof value === 'string' && field && PATH_FIELDS.has(field) && isAbsoluteAny(value)) {
         const absolute = path.resolve(value);
         const rel = path.relative(root, absolute);
@@ -23,7 +39,10 @@ function encode(value: DiskValue, root: string, field?: string): DiskValue {
         return value;
     }
     if (Array.isArray(value)) return value.map((item) => encode(item, root, field));
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [encodeObjectKey(k, root), encode(v, root, k)]));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => {
+        const linkMap = fileLinks && (k === 'builds' || k === 'explicit') && v && typeof v === 'object' && !Array.isArray(v);
+        return [encodeObjectKey(k, root), linkMap ? encodeLinkMap(v as Record<string, unknown>, root, k === 'builds' ? 'script' : 'gds') : encode(v, root, k)];
+    }));
     return value;
 }
 
@@ -34,10 +53,24 @@ function decode(value: DiskValue, root: string): DiskValue {
     return value;
 }
 
-function encodeObjectKey(key: string, root: string): string {
+function encodeObjectKey(key: string, root: string, witness?: string): string {
     if (!isAbsoluteAny(key)) return key;
-    const absolute = path.resolve(key), rel = path.relative(root, absolute);
-    return rel && rel !== '..' && !rel.startsWith(`..${path.sep}`) ? `${KEY_TAG}${rel.split(path.sep).join('/')}` : key;
+    if (witness && path.isAbsolute(witness) && path.isAbsolute(key) && path.resolve(witness).toLowerCase() === path.resolve(key).toLowerCase()) {
+        // Link records retain the actual path spelling. Use it to avoid moving
+        // a genuine external case-only sibling whose logical key was folded.
+        if (!relativeKeyPath(root, witness)) return key;
+        const relative = relativeKeyPath(root, key, true);
+        return relative ? `${KEY_TAG}${relative.split(path.sep).join('/')}` : key;
+    }
+    const relative = relativeKeyPath(root, key);
+    return relative ? `${KEY_TAG}${relative.split(path.sep).join('/')}` : key;
+}
+
+function encodeLinkMap(value: Record<string, unknown>, root: string, pathField: 'script' | 'gds'): DiskValue {
+    return Object.fromEntries(Object.entries(value).map(([key, record]) => {
+        const witness = record && typeof record === 'object' && !Array.isArray(record) ? (record as Record<string, unknown>)[pathField] : undefined;
+        return [encodeObjectKey(key, root, typeof witness === 'string' ? witness : undefined), encode(record, root, key)];
+    }));
 }
 
 function decodeObjectKey(key: string, root: string): string {
@@ -118,7 +151,7 @@ export class ProjectStore {
             const observed = await this.fingerprint(this.filePath!);
             if (observed !== this.diskFingerprint) throw new Error('GDS Navigator project store changed externally; reload before writing.');
             const entries: Record<string, unknown> = {};
-            for (const [entryKey, entryValue] of next) entries[this.encodeKey(entryKey)] = encode(entryValue, this.root!, this.valueField(entryKey));
+            for (const [entryKey, entryValue] of next) entries[this.encodeKey(entryKey)] = encode(entryValue, this.root!, this.valueField(entryKey), entryKey.toLowerCase() === 'gdsnavigator.filelinks.v1');
             const payload = JSON.stringify({ version: STORE_VERSION, entries }, null, 2) + '\n';
             const dir = path.dirname(this.filePath!);
             await fs.promises.mkdir(dir, { recursive: true });
@@ -136,8 +169,8 @@ export class ProjectStore {
         const suffixStart = key.indexOf(':', marker.length);
         const suffix = suffixStart >= marker.length ? key.slice(suffixStart + 1) : key.slice(marker.length);
         if (!isAbsoluteAny(suffix)) return key;
-        const absolute = path.resolve(suffix), rel = path.relative(this.root, absolute);
-        return rel && rel !== '..' && !rel.startsWith(`..${path.sep}`) ? `${key.slice(0, suffixStart + 1)}${KEY_TAG}${rel.split(path.sep).join('/')}` : key;
+        const rel = relativeKeyPath(this.root, suffix, FOLDED_DOCUMENT_KEYS.has(key.slice(0, suffixStart).toLowerCase()));
+        return rel ? `${key.slice(0, suffixStart + 1)}${KEY_TAG}${rel.split(path.sep).join('/')}` : key;
     }
 
     private decodeKey(key: string): string {
