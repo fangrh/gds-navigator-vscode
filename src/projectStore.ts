@@ -17,10 +17,19 @@ function isAbsoluteAny(value: string): boolean {
     return path.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\');
 }
 
+function isNativeAbsolute(value: string): boolean {
+    const windowsQualified = /^[A-Za-z]:[\\/]/.test(value) || /^[\\/]{2}[^\\/]+[\\/]+[^\\/]+/.test(value);
+    if (path.sep === '\\') return windowsQualified;
+    // Double-leading separators may name a foreign UNC share. Keep ambiguous
+    // paths opaque instead of interpreting them relative to this host.
+    return !windowsQualified && path.isAbsolute(value) && !value.startsWith('//');
+}
+
 function relativeKeyPath(root: string, candidate: string, allowFolded = false): string | undefined {
+    if (!isNativeAbsolute(candidate)) return undefined;
     const absolute = path.resolve(candidate), rel = path.relative(root, absolute);
-    if (rel && rel !== '..' && !rel.startsWith(`..${path.sep}`)) return rel;
-    if (!allowFolded || !path.isAbsolute(candidate)) return undefined;
+    if (rel && !path.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`)) return rel;
+    if (!allowFolded) return undefined;
     const resolvedRoot = path.resolve(root);
     const rootAnchor = path.parse(resolvedRoot).root, candidateAnchor = path.parse(absolute).root;
     if (rootAnchor.toLowerCase() !== candidateAnchor.toLowerCase()) return undefined;
@@ -34,9 +43,8 @@ function relativeKeyPath(root: string, candidate: string, allowFolded = false): 
 
 function encode(value: DiskValue, root: string, field?: string, fileLinks = false): DiskValue {
     if (typeof value === 'string' && field && PATH_FIELDS.has(field) && isAbsoluteAny(value)) {
-        const absolute = path.resolve(value);
-        const rel = path.relative(root, absolute);
-        if (rel && rel !== '..' && !rel.startsWith(`..${path.sep}`)) return { [TAG]: rel.split(path.sep).join('/') };
+        const rel = relativeKeyPath(root, value);
+        if (rel) return { [TAG]: rel.split(path.sep).join('/') };
         return value;
     }
     if (Array.isArray(value)) return value.map((item) => encode(item, root, field));
