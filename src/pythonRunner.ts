@@ -233,11 +233,30 @@ export function runPythonScript(
 
 async function snapshotGds(dir: string): Promise<Map<string, string>> {
     const result = new Map<string, string>();
-    async function walk(current: string): Promise<void> {
-        let entries: fs.Dirent[]; try { entries = await fs.promises.readdir(current, { withFileTypes: true }); } catch { return; }
-        for (const entry of entries) { if (entry.name.startsWith('.') || entry.name === 'node_modules') continue; const full = path.join(current, entry.name); if (entry.isDirectory()) await walk(full); else if (entry.name.toLowerCase().endsWith('.gds')) { try { const s = await fs.promises.stat(full); const hash = await sha256File(full); result.set(path.resolve(full), `${s.size}:${s.mtimeMs}:${hash}`); } catch { /* race */ } } }
+    async function* walk(current: string): AsyncGenerator<string> {
+        let entries: fs.Dirent[];
+        try { entries = await fs.promises.readdir(current, { withFileTypes: true }); }
+        catch { return; }
+        for (const entry of entries) {
+            if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+            const full = path.join(current, entry.name);
+            if (entry.isDirectory()) yield* walk(full);
+            else if (entry.name.toLowerCase().endsWith('.gds')) yield full;
+        }
     }
-    await walk(dir); return result;
+    // The shared iterator serializes directory traversal while four readers
+    // overlap filesystem waits. It keeps streams and queued paths bounded.
+    const files = walk(dir);
+    await Promise.all(Array.from({ length: 4 }, async () => {
+        for await (const full of files) {
+            try {
+                const s = await fs.promises.stat(full);
+                const hash = await sha256File(full);
+                result.set(path.resolve(full), `${s.size}:${s.mtimeMs}:${hash}`);
+            } catch { /* race */ }
+        }
+    }));
+    return result;
 }
 
 export async function findChangedGds(dir: string, before: Map<string, string> = new Map()): Promise<string[]> {
