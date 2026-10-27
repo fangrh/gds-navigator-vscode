@@ -136,9 +136,11 @@ export function runPythonScript(
         let removeAbort = () => {};
         let auditDir: string | undefined;
         let auditFile: string | undefined;
+        const inspectionController = new AbortController();
+        let inspection: Promise<string[]> | undefined;
         const finish = (result: RunResult) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); removeAbort(); if (auditDir && cleanupSafe) void fs.promises.rm(auditDir, { recursive: true, force: true }).catch(() => {}); resolve(result); };
         const snapshot = async () => {
-            before = await snapshotGds(cwd);
+            before = await snapshotGds(cwd, options.signal);
             auditDir = await fs.promises.mkdtemp(path.join(require('os').tmpdir(), 'gds-nav-audit-'));
             auditFile = path.join(auditDir, 'writes.jsonl');
         };
@@ -162,10 +164,16 @@ export function runPythonScript(
             terminationResult = result;
             if (timer) clearTimeout(timer);
             removeAbort();
-            void child.terminate().then(() => finish(result), error => {
-                cleanupSafe = false;
-                output.appendLine(`[run] shutdown could not be verified; audit retained at ${auditDir}`);
-                finish({ ...result, reason: `${result.reason}; ${error.message}` });
+            inspectionController.abort();
+            // Inspection can still own file reads after Python exits. Drain it
+            // as well as the process tree before publishing cancellation.
+            void Promise.allSettled([child.terminate(), inspection]).then(([shutdown]) => {
+                if (shutdown.status === 'fulfilled') finish(result);
+                else {
+                    cleanupSafe = false;
+                    output.appendLine(`[run] shutdown could not be verified; audit retained at ${auditDir}`);
+                    finish({ ...result, reason: `${result.reason}; ${shutdown.reason.message}` });
+                }
             });
         };
         const overflow = () => { output.appendLine('[run] output limit exceeded; terminating Python'); requestTermination({ ok: false, reason: 'Python output exceeded the configured limit' }); };
@@ -217,7 +225,8 @@ export function runPythonScript(
                 return;
             }
             try {
-                const changed = await findAuditedChangedGds(cwd, before, auditFile);
+                inspection = findAuditedChangedGds(cwd, before, auditFile, inspectionController.signal);
+                const changed = await inspection;
                 if (settled || terminationResult) return;
                 if (changed.length !== 1) {
                     const reason = changed.length === 0 ? 'Python build produced no new or modified GDS file' : `Python build produced multiple GDS files (${changed.length}); choose an explicit output`;
@@ -227,17 +236,24 @@ export function runPythonScript(
                 finish({ ok: true, gdsPath: changed[0], candidates: changed });
             } catch (err: any) { if (!terminationResult) finish({ ok: false, reason: `Could not inspect build outputs: ${err?.message || err}` }); }
         });
-        }).catch((err) => finish({ ok: false, reason: `Could not inspect build outputs: ${err.message}` }));
+        }).catch((err) => finish({ ok: false, reason: options.signal?.aborted ? 'Python build cancelled' : `Could not inspect build outputs: ${err.message}` }));
     });
 }
 
-async function snapshotGds(dir: string): Promise<Map<string, string>> {
+function checkScanCancelled(signal?: AbortSignal): void {
+    if (signal?.aborted) throw new Error('Python build cancelled');
+}
+
+async function snapshotGds(dir: string, signal?: AbortSignal): Promise<Map<string, string>> {
+    checkScanCancelled(signal);
     const result = new Map<string, string>();
     async function* walk(current: string): AsyncGenerator<string> {
+        if (signal?.aborted) return;
         let entries: fs.Dirent[];
         try { entries = await fs.promises.readdir(current, { withFileTypes: true }); }
         catch { return; }
         for (const entry of entries) {
+            if (signal?.aborted) return;
             if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
             const full = path.join(current, entry.name);
             if (entry.isDirectory()) yield* walk(full);
@@ -249,25 +265,29 @@ async function snapshotGds(dir: string): Promise<Map<string, string>> {
     const files = walk(dir);
     await Promise.all(Array.from({ length: 4 }, async () => {
         for await (const full of files) {
+            if (signal?.aborted) break;
             try {
                 const s = await fs.promises.stat(full);
-                const hash = await sha256File(full);
+                if (signal?.aborted) break;
+                const hash = await sha256File(full, signal);
+                if (signal?.aborted) break;
                 result.set(path.resolve(full), `${s.size}:${s.mtimeMs}:${hash}`);
             } catch { /* race */ }
         }
     }));
+    checkScanCancelled(signal);
     return result;
 }
 
-export async function findChangedGds(dir: string, before: Map<string, string> = new Map()): Promise<string[]> {
-    const after = await snapshotGds(dir); const changed: string[] = [];
+export async function findChangedGds(dir: string, before: Map<string, string> = new Map(), signal?: AbortSignal): Promise<string[]> {
+    const after = await snapshotGds(dir, signal); const changed: string[] = [];
     for (const [file, fingerprint] of after) if (!sameFingerprint(before.get(file), fingerprint)) changed.push(file);
     return changed.sort();
 }
 
-async function sha256File(file: string): Promise<string> {
+async function sha256File(file: string, signal?: AbortSignal): Promise<string> {
     const hash = require('crypto').createHash('sha256');
-    const stream = fs.createReadStream(file);
+    const stream = fs.createReadStream(file, { signal });
     for await (const chunk of stream) hash.update(chunk as Buffer);
     return hash.digest('hex');
 }
@@ -282,11 +302,13 @@ function sameFingerprint(before: string | undefined, after: string): boolean {
 
 interface AuditRow { path?: string; before?: { exists?: boolean; sha256?: string; size?: number; mtimeMs?: number }; after?: { exists?: boolean; sha256?: string; size?: number; mtimeMs?: number }; }
 
-async function findAuditedChangedGds(dir: string, before: Map<string, string>, auditFile?: string): Promise<string[]> {
-    const candidates = new Set(await findChangedGds(dir, before));
+async function findAuditedChangedGds(dir: string, before: Map<string, string>, auditFile?: string, signal?: AbortSignal): Promise<string[]> {
+    const candidates = new Set(await findChangedGds(dir, before, signal));
+    checkScanCancelled(signal);
     if (auditFile) {
         let text = '';
-        try { text = await fs.promises.readFile(auditFile, 'utf8'); } catch { /* cwd fallback remains authoritative */ }
+        try { text = await fs.promises.readFile(auditFile, { encoding: 'utf8', signal }); } catch { /* cwd fallback remains authoritative */ }
+        checkScanCancelled(signal);
         for (const line of text.split(/\r?\n/)) {
             if (!line.trim()) continue;
             try {
@@ -300,13 +322,17 @@ async function findAuditedChangedGds(dir: string, before: Map<string, string>, a
     const existing: string[] = [];
     const identities = new Set<string>();
     for (const candidate of candidates) {
+        checkScanCancelled(signal);
         try {
-            if (!(await fs.promises.stat(candidate)).isFile()) continue;
+            const stat = await fs.promises.stat(candidate);
+            checkScanCancelled(signal);
+            if (!stat.isFile()) continue;
             let identity = candidate;
             if (candidates.size > 1) {
                 try { identity = await fs.promises.realpath(candidate); }
                 catch { /* Keep stat-confirmed outputs if canonicalization is unavailable. */ }
             }
+            checkScanCancelled(signal);
             // Workspace snapshots precede audit paths. Keep their spelling so
             // the editor can refresh an existing viewer opened through an alias.
             if (identities.has(identity)) continue;
@@ -314,6 +340,7 @@ async function findAuditedChangedGds(dir: string, before: Map<string, string>, a
             existing.push(candidate);
         } catch { /* disappeared output */ }
     }
+    checkScanCancelled(signal);
     return existing.sort();
 }
 

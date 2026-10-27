@@ -77,6 +77,8 @@ async function bounded(promise, label, timeoutMs = 2000) {
     const controller = new AbortController();
     const output = { show() {}, appendLine() {} };
     const resultPromise = runPythonScript('python', path.join(cwd, 'build.py'), cwd, output, { signal: controller.signal, timeoutMs: 5000 });
+    let settled = false;
+    resultPromise.then(() => { settled = true; });
     // Snapshot and spawn complete before close; the output inspection is then held open.
     await bounded(spawned, 'spawn');
     // The uncancelled path must have a real changed output to publish.
@@ -84,12 +86,15 @@ async function bounded(promise, label, timeoutMs = 2000) {
     proc.close();
     await bounded(inspectionStarted, 'output inspection');
     controller.abort();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(settled, false, 'cancellation waits for the pending audit read to drain');
     releaseInspection();
     const result = await resultPromise;
     assert.equal(result.ok, false);
     assert.match(result.reason, /cancelled/);
     assert.equal(result.candidates, undefined, 'late cancellation must not publish output candidates');
   } finally {
+    releaseInspection();
     Module._load = originalLoad;
     fs.promises.readFile = originalReadFile;
     await fs.promises.rm(temp, { recursive: true, force: true });
