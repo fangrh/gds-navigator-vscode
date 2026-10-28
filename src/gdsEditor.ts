@@ -1002,7 +1002,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
                     await this.env.ready?.(gdsPath || script);
                     if (controller.signal.aborted) return { ok: false, reason: 'Build cancelled before execution.' };
                     const python = this.env.getPython(gdsPath || script);
-                    const diagnostics = await inspectPython(python);
+                    const diagnostics = await inspectPython(python, undefined, controller.signal);
                     this.output.appendLine('[environment] ' + JSON.stringify(diagnostics));
                     if (controller.signal.aborted) return { ok: false, reason: 'Build cancelled before execution.' };
                     return await runPythonScript(python, script, cwd, this.output, { signal: controller.signal });

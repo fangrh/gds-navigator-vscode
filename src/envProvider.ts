@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { readProjectEnvironment, saveProjectEnvironment } from './projectEnvironment';
 import { PythonEnvironmentManager, type EnvironmentManager } from './pythonEnvironmentManager';
+import { spawnPythonProcess } from './pythonProcess';
 
 export interface CondaEnv { name: string; prefix: string; }
 export interface PythonDiagnostics {
@@ -15,7 +16,8 @@ export interface PythonDiagnostics {
 }
 
 // Imports may print warnings. Only our tagged record is interpreted as diagnostics.
-export function inspectPython(pythonPath: string, timeoutMs = 12_000): Promise<PythonDiagnostics> {
+export function inspectPython(pythonPath: string, timeoutMs = 12_000, signal?: AbortSignal): Promise<PythonDiagnostics> {
+    if (signal?.aborted) return Promise.resolve({ executable: pythonPath, error: 'Python diagnostics cancelled' });
     const code = `import json, pathlib, subprocess, sys
 out = {"executable": sys.executable, "prefix": sys.prefix, "basePrefix": sys.base_prefix, "pythonVersion": sys.version.split()[0], "packageErrors": {}}
 try:
@@ -46,22 +48,33 @@ try:
 except Exception: pass
 print("GDS_NAV_DIAGNOSTICS=" + json.dumps(out))`;
     return new Promise(resolve => {
-        const proc = spawn(pythonPath, ['-c', code], { windowsHide: true });
-        let stdout = '', bytes = 0, settled = false;
+        const child = spawnPythonProcess(pythonPath, ['-c', code]);
+        const { proc } = child;
+        let stdout = '', bytes = 0, settled = false, stopping = false;
+        let removeAbort = () => {};
         const finish = (value: PythonDiagnostics) => {
             if (settled) return;
-            settled = true; clearTimeout(timer); resolve(value);
+            settled = true; clearTimeout(timer); removeAbort(); resolve(value);
         };
-        const timer = setTimeout(() => { proc.kill(); finish({ executable: pythonPath, error: 'Python diagnostics timed out' }); }, timeoutMs);
+        const stop = (value: PythonDiagnostics) => {
+            if (settled || stopping) return;
+            stopping = true; clearTimeout(timer); removeAbort();
+            void child.terminate().then(() => finish(value), error => finish({
+                ...value, error: `${value.error}; ${error instanceof Error ? error.message : String(error)}`,
+            }));
+        };
+        const timer = setTimeout(() => stop({ executable: pythonPath, error: 'Python diagnostics timed out' }), timeoutMs);
         const consume = (d: Buffer, retain: boolean) => {
+            if (settled || stopping) return;
             bytes += d.length;
-            if (bytes > 256 * 1024) { proc.kill(); finish({ executable: pythonPath, error: 'Python diagnostics output limit exceeded' }); }
+            if (bytes > 256 * 1024) { stop({ executable: pythonPath, error: 'Python diagnostics output limit exceeded' }); }
             else if (retain) stdout += d.toString();
         };
         proc.stdout.on('data', d => consume(d, true));
         proc.stderr.on('data', d => consume(d, false));
-        proc.on('error', error => finish({ executable: pythonPath, error: error.message }));
+        proc.on('error', error => { if (!stopping) finish({ executable: pythonPath, error: error.message }); });
         proc.on('close', exit => {
+            if (settled || stopping) return;
             if (exit !== 0) return finish({ executable: pythonPath, error: `Python exited with code ${exit}` });
             try {
                 const record = stdout.split(/\r?\n/).find(line => line.startsWith('GDS_NAV_DIAGNOSTICS='));
@@ -69,6 +82,12 @@ print("GDS_NAV_DIAGNOSTICS=" + json.dumps(out))`;
                 finish(JSON.parse(record.slice('GDS_NAV_DIAGNOSTICS='.length)));
             } catch { finish({ executable: pythonPath, error: 'Invalid diagnostics JSON' }); }
         });
+        const abort = () => stop({ executable: pythonPath, error: 'Python diagnostics cancelled' });
+        if (signal) {
+            removeAbort = () => signal.removeEventListener('abort', abort);
+            signal.addEventListener('abort', abort, { once: true });
+            if (signal.aborted) abort();
+        }
     });
 }
 
