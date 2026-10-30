@@ -25,6 +25,11 @@ async function main() {
   const values = new Map();
   const memento = { keys: [], get: (key) => values.get(key), update: async (key, value) => { if (value === undefined) values.delete(key); else values.set(key, value); memento.keys = [...values.keys()]; } };
   const vscode = {
+    CancellationTokenSource: class {
+      constructor() { this.token = { isCancellationRequested: false }; }
+      cancel() { this.token.isCancellationRequested = true; }
+      dispose() {}
+    },
     window: {
       createTextEditorDecorationType: () => ({}),
       showErrorMessage() {}, showWarningMessage(message) { calls.warnings.push(message); }, showInformationMessage() {},
@@ -103,7 +108,7 @@ async function main() {
       assert(samePath(provider.getAssociatedScript(cycleGds), cycleScript), `cycle ${i} link mismatch`);
       assert(samePath(provider.getAssociatedScript(gds), script), `cycle ${i} mixed the original link`);
     }
-    provider.dispose();
+    await provider.shutdown();
     console.log(JSON.stringify({ status: 'passed', successful: true, noOutput: true, multiple: true, associationNoBuild: true, relatedFiles: true, cycles: 20 }));
   } finally {
     if (childProcess && realSpawn) childProcess.spawn = realSpawn;

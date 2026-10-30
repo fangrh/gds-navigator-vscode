@@ -8,6 +8,7 @@ import { spawnPythonProcess } from './pythonProcess';
 
 export interface CondaEnv { name: string; prefix: string; }
 export interface PythonDiagnostics {
+    shutdownError?: string;
     executable: string; prefix?: string; basePrefix?: string; pythonVersion?: string;
     gdsfactory?: { path?: string; version?: string; error?: string };
     klayout?: { path?: string; error?: string };
@@ -61,6 +62,7 @@ print("GDS_NAV_DIAGNOSTICS=" + json.dumps(out))`;
             stopping = true; clearTimeout(timer); removeAbort();
             void child.terminate().then(() => finish(value), error => finish({
                 ...value, error: `${value.error}; ${error instanceof Error ? error.message : String(error)}`,
+                shutdownError: error instanceof Error ? error.message : String(error),
             }));
         };
         const timer = setTimeout(() => stop({ executable: pythonPath, error: 'Python diagnostics timed out' }), timeoutMs);

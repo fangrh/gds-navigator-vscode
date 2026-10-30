@@ -91,6 +91,7 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export async function deactivate(): Promise<void> {
-    await activeProvider?.shutdownUsage();
-    activeProvider = undefined;
+    const provider = activeProvider;
+    await provider?.shutdown();
+    if (activeProvider === provider) activeProvider = undefined;
 }

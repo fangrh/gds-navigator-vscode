@@ -44,7 +44,7 @@ async function main() {
     passed = true;
   } catch (error) { failure = error; throw error; }
   finally {
-    if (provider) { try { provider.dispose(); } catch (error) { failure ||= error; } }
+    if (provider) { try { await provider.shutdown(); } catch (error) { failure ||= error; } }
     if (originalLoad) Module._load = originalLoad;
     const markers = [temp, canonical, alias].filter(Boolean); let survivors; let cleanupVerified = false;
     try {

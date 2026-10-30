@@ -5,6 +5,8 @@ import * as path from 'path';
 
 export interface RunResult {
     ok: boolean;
+    /** Present when owned Python termination could not be verified. */
+    shutdownError?: string;
     /** The single new or modified .gds produced by this script run. */
     gdsPath?: string;
     reason?: string;
@@ -171,8 +173,9 @@ export function runPythonScript(
                 if (shutdown.status === 'fulfilled') finish(result);
                 else {
                     cleanupSafe = false;
+                    const detail = shutdown.reason instanceof Error ? shutdown.reason.message : String(shutdown.reason);
                     output.appendLine(`[run] shutdown could not be verified; audit retained at ${auditDir}`);
-                    finish({ ...result, reason: `${result.reason}; ${shutdown.reason.message}` });
+                    finish({ ...result, reason: `${result.reason}; ${detail}`, shutdownError: detail });
                 }
             });
         };

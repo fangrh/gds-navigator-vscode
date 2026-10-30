@@ -112,6 +112,9 @@ async function main() {
         mode = 'overflow'; result = await inspectPython('diagnostics-test-executable'); assert.match(result.error, /output limit exceeded/); report.cases.push({ name: 'output-limit', status: 'passed' });
         mode = 'hold'; const controller = new AbortController(); let settled = false; const pending = inspectPython('diagnostics-test-executable', 1000, controller.signal); pending.then(() => { settled = true; }); controller.abort(); await new Promise(resolve => setImmediate(resolve)); assert.equal(settled, false); last.stdout.emit('data', Buffer.from('GDS_NAV_DIAGNOSTICS={"executable":"late","pythonVersion":"late"}\n')); last.close(0); result = await pending; assert.equal(result.error, 'Python diagnostics cancelled'); report.cases.push({ name: 'mock-cancellation-late-output', status: 'passed' });
         const pre = new AbortController(); pre.abort(); const before = spawnCount; result = await inspectPython('diagnostics-test-executable', 1000, pre.signal); assert.equal(result.error, 'Python diagnostics cancelled'); assert.equal(spawnCount, before); report.cases.push({ name: 'preabort-no-spawn', status: 'passed' });
+        mode = 'hold'; result = await inspectPython('diagnostics-test-executable', 10);
+        assert.match(result.error, /timed out/); assert.match(result.shutdownError, /Could not confirm Python process exit/);
+        last.close(0); report.cases.push({ name: 'unverified-shutdown-is-explicit', status: 'passed' });
 
         report.status = 'passed';
         console.log(JSON.stringify({ status: 'passed', scenarios: report.cases.length }));

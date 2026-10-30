@@ -163,6 +163,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
             || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || (file ? path.dirname(file) : undefined);
     }
     private usage(file?: string): UsageLog | undefined {
+        if (this.shuttingDown) return;
         const root = this.usageRoot(file); if (!root) return;
         let log = this.usageLogs.get(root);
         if (!log) {
@@ -227,6 +228,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
         webviewPanel: vscode.WebviewPanel,
         _token: vscode.CancellationToken
     ): Promise<void> {
+        if (this.shuttingDown) return;
         const gdsPath = document.uri.fsPath;
         void this.env.setupProject?.(gdsPath).catch((error: any) => this.output.appendLine('[environment] project setup unavailable: ' + (error?.message || error)));
         const entry: ViewerEntry = { panel: webviewPanel, gdsPath, ready: false, loading: false, saveQueue: Promise.resolve(), images: new Map(), imageRevisions: new Map() };
@@ -694,7 +696,9 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
     // ------------------------------------------------------------------
 
     private async loadGds(entry: ViewerEntry, restoreImage = false): Promise<void> {
+        if (this.shuttingDown || entry.disposed) return;
         await this.state.ready();
+        if (this.shuttingDown || entry.disposed) return;
         if (this.state.warning && !this.storeWarningShown) {
             this.storeWarningShown = true;
             this.output.appendLine(this.state.warning);
@@ -965,10 +969,13 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
     }
 
     async rebuild(gdsPath: string, entry?: ViewerEntry): Promise<void> {
+        if (this.shuttingDown) return;
         await this.state.ready();
+        if (this.shuttingDown) return;
         let script = this.resolveScriptFor(gdsPath);
         if (!script) {
             script = await this.promptForScript(gdsPath, 'The generating script is missing or ambiguous. Choose the Python script for this GDS.');
+            if (this.shuttingDown) return;
             if (!script) {
                 await (entry?.panel.webview.postMessage({ type: 'rebuildError' }));
                 return;
@@ -979,9 +986,22 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
     }
 
     private builds = new Map<string, AbortController>();
+    private buildTasks = new Set<Promise<void>>();
+    private shuttingDown = false;
+    private shutdownPromise?: Promise<void>;
 
-    private async runScriptFor(script: string, gdsPath?: string): Promise<void> {
+    private runScriptFor(script: string, gdsPath?: string): Promise<void> {
+        if (this.shuttingDown) return Promise.resolve();
+        const task = this.executeScriptFor(script, gdsPath);
+        this.buildTasks.add(task);
+        const remove = () => this.buildTasks.delete(task);
+        void task.then(remove, remove);
+        return task;
+    }
+
+    private async executeScriptFor(script: string, gdsPath?: string): Promise<void> {
         await this.state.ready();
+        if (this.shuttingDown) return;
         // Layout scripts typically write to paths relative to the project root
         // (e.g. write_gds("gds/x.gds")), so run them with the workspace folder
         // as cwd when possible — matching how the user runs them manually.
@@ -991,55 +1011,75 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
         const key = cwd.toLowerCase();
         if (this.builds.has(key)) { vscode.window.showWarningMessage('A build is already running in this workspace. Cancel it before rebuilding.'); return; }
         const controller = new AbortController(); this.builds.set(key, controller);
-        const usageLog = this.usage(gdsPath || script), started = Date.now();
-        const usageFields: UsageFields = { source: 'extension', documentId: hashDocument(gdsPath || script) };
-        usageLog?.record('build.run', { ...usageFields, phase: 'intent' });
-        let result;
         try {
-            result = await vscode.window.withProgress<RunResult>({ location: vscode.ProgressLocation.Notification, title: 'Building ' + path.basename(script), cancellable: true }, async (_progress, token) => {
-                const subscription = token.onCancellationRequested(() => controller.abort());
-                try {
-                    await this.env.ready?.(gdsPath || script);
-                    if (controller.signal.aborted) return { ok: false, reason: 'Build cancelled before execution.' };
-                    const python = this.env.getPython(gdsPath || script);
-                    const diagnostics = await inspectPython(python, undefined, controller.signal);
-                    this.output.appendLine('[environment] ' + JSON.stringify(diagnostics));
-                    if (controller.signal.aborted) return { ok: false, reason: 'Build cancelled before execution.' };
-                    return await runPythonScript(python, script, cwd, this.output, { signal: controller.signal });
-                }
-                finally { subscription.dispose(); }
-            });
-        } catch (error) { usageLog?.record('build.run', { ...usageFields, phase: 'result', outcome: controller.signal.aborted ? 'cancelled' : 'failure', durationMs: Date.now() - started }); throw error; } finally { this.builds.delete(key); }
-        if (result.candidates?.length) await this.enqueueWorkspaceUpdate(this.linksKey, updateBuildLinks(this.state.get(this.linksKey), script, result.candidates));
-        else if (result.ok && result.gdsPath) await this.enqueueWorkspaceUpdate(this.linksKey, updateBuildLinks(this.state.get(this.linksKey), script, [result.gdsPath]));
-        if (!result.ok && result.candidates && result.candidates.length > 1) {
-            const chosen = await vscode.window.showQuickPick(result.candidates.map(file => ({label:path.basename(file),description:file})), { title:'Choose the GDS output to inspect' });
-            if (chosen) { result = { ...result, ok:true, gdsPath:chosen.description }; }
-        }
-        usageLog?.record('build.run', { ...usageFields, phase: 'result', outcome: controller.signal.aborted ? 'cancelled' : result.ok ? 'success' : 'failure', durationMs: Date.now() - started });
-        if (!result.ok) {
-            vscode.window.showWarningMessage('GDS Navigator: ' + (result.reason || 'Build did not complete.'));
-            const list = gdsPath ? this.viewers.get(gdsPath) || [] : [];
-            for (const v of list) {
-                v.panel.webview.postMessage({ type: 'rebuildError' });
+            const usageLog = this.usage(gdsPath || script), started = Date.now();
+            const usageFields: UsageFields = { source: 'extension', documentId: hashDocument(gdsPath || script) };
+            usageLog?.record('build.run', { ...usageFields, phase: 'intent' });
+            let result;
+            try {
+                result = await vscode.window.withProgress<RunResult>({ location: vscode.ProgressLocation.Notification, title: 'Building ' + path.basename(script), cancellable: true }, async (_progress, token) => {
+                    const subscription = token.onCancellationRequested(() => controller.abort());
+                    try {
+                        await this.env.ready?.(gdsPath || script);
+                        if (controller.signal.aborted) return { ok: false, reason: 'Build cancelled before execution.' };
+                        const python = this.env.getPython(gdsPath || script);
+                        const diagnostics = await inspectPython(python, undefined, controller.signal);
+                        this.output.appendLine('[environment] ' + JSON.stringify(diagnostics));
+                        if (diagnostics.shutdownError) throw new Error(diagnostics.error || diagnostics.shutdownError);
+                        if (controller.signal.aborted) return { ok: false, reason: 'Build cancelled before execution.' };
+                        return await runPythonScript(python, script, cwd, this.output, { signal: controller.signal });
+                    }
+                    finally { subscription.dispose(); }
+                });
+            } catch (error) { usageLog?.record('build.run', { ...usageFields, phase: 'result', outcome: controller.signal.aborted ? 'cancelled' : 'failure', durationMs: Date.now() - started }); throw error; }
+            if (result.shutdownError) throw new Error(result.reason || result.shutdownError);
+            if (this.shuttingDown) {
+                usageLog?.record('build.run', { ...usageFields, phase: 'result', outcome: 'cancelled', durationMs: Date.now() - started });
+                return;
             }
-            return;
-        }
-        const produced = result.gdsPath;
-        if (produced && this.viewers.has(produced)) {
-            await this.refresh(produced);
-        } else if (produced && produced !== gdsPath) {
-            await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(produced), GdsEditorProvider.viewType);
-        } else if (produced) {
-            await this.refresh(produced);
-        }
+            if (result.candidates?.length) await this.enqueueWorkspaceUpdate(this.linksKey, updateBuildLinks(this.state.get(this.linksKey), script, result.candidates));
+            else if (result.ok && result.gdsPath) await this.enqueueWorkspaceUpdate(this.linksKey, updateBuildLinks(this.state.get(this.linksKey), script, [result.gdsPath]));
+            if (!this.shuttingDown && !result.ok && result.candidates && result.candidates.length > 1) {
+                const choice = new vscode.CancellationTokenSource();
+                const abortChoice = () => choice.cancel();
+                controller.signal.addEventListener('abort', abortChoice, { once: true });
+                if (controller.signal.aborted) choice.cancel();
+                try {
+                    const chosen = await vscode.window.showQuickPick(result.candidates.map(file => ({label:path.basename(file),description:file})), { title:'Choose the GDS output to inspect' }, choice.token);
+                    if (chosen) { result = { ...result, ok:true, gdsPath:chosen.description }; }
+                } finally {
+                    controller.signal.removeEventListener('abort', abortChoice);
+                    choice.dispose();
+                }
+            }
+            usageLog?.record('build.run', { ...usageFields, phase: 'result', outcome: this.shuttingDown || controller.signal.aborted ? 'cancelled' : result.ok ? 'success' : 'failure', durationMs: Date.now() - started });
+            if (this.shuttingDown) return;
+            if (!result.ok) {
+                vscode.window.showWarningMessage('GDS Navigator: ' + (result.reason || 'Build did not complete.'));
+                const list = gdsPath ? this.viewers.get(gdsPath) || [] : [];
+                for (const v of list) {
+                    v.panel.webview.postMessage({ type: 'rebuildError' });
+                }
+                return;
+            }
+            const produced = result.gdsPath;
+            if (produced && this.viewers.has(produced)) {
+                await this.refresh(produced);
+            } else if (produced && produced !== gdsPath) {
+                await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(produced), GdsEditorProvider.viewType);
+            } else if (produced) {
+                await this.refresh(produced);
+            }
+        } finally { this.builds.delete(key); }
     }
 
     async associateAndRebuild(gdsPath: string): Promise<void> {
+        if (this.shuttingDown) return;
         const script = await this.promptForScript(
             gdsPath,
             `No provenance sidecar found for ${path.basename(gdsPath)}. Appoint the Python script that generates it.`
         );
+        if (this.shuttingDown) return;
         if (!script) {
             return;
         }
@@ -1060,6 +1100,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
 
     /** Command entry: run any script (active editor or file picker). */
     async commandRunScript(uri?: vscode.Uri): Promise<void> {
+        if (this.shuttingDown) return;
         let script: string | undefined;
         const active = uri?.fsPath || vscode.window.activeTextEditor?.document.uri.fsPath;
         if (active && active.endsWith('.py')) {
@@ -1124,6 +1165,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
 
     /** Command entry: rebuild the layout of the active viewer. */
     async commandRebuild(): Promise<void> {
+        if (this.shuttingDown) return;
         if (!this.activeGdsPath) {
             vscode.window.showErrorMessage('GDS Navigator: no GDS viewer is active.');
             return;
@@ -1260,16 +1302,35 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
     // File watching — reload when the .gds or its sidecar changes
     // ------------------------------------------------------------------
 
-    dispose(): void {
-        void this.shutdownUsage();
-        for (const dispose of this.instructionWatchers.values()) dispose();
+    /** Stop accepting builds and drain owned build work before deactivation. */
+    shutdown(): Promise<void> {
+        if (this.shutdownPromise) return this.shutdownPromise;
+        this.shuttingDown = true;
+        const failures: unknown[] = [];
+        this.shutdownPromise = Promise.resolve().then(async () => {
+            const results = await Promise.allSettled([...this.buildTasks]);
+            for (const result of results) if (result.status === 'rejected') failures.push(result.reason);
+            try { await this.workspaceWrites; } catch (error) { failures.push(error); }
+            try { await this.shutdownUsage(); } catch (error) { failures.push(error); }
+            if (failures.length) throw new AggregateError(failures, 'Could not complete GDS build shutdown: ' + failures.map(error => error instanceof Error ? error.message : String(error)).join('; '));
+        });
+        const release = (dispose: () => void) => { try { dispose(); } catch (error) { failures.push(error); } };
+        for (const controller of this.builds.values()) release(() => controller.abort());
+        for (const dispose of this.instructionWatchers.values()) release(dispose);
         this.instructionWatchers.clear();
-        for (const entries of this.viewers.values()) for (const entry of entries) entry.catalogController?.abort();
-        for (const entries of this.viewers.values()) for (const entry of entries) entry.thumbnailController?.abort();
-        for (const list of this.watchers.values()) { list.forEach(w => w.dispose()); }
+        for (const entries of this.viewers.values()) for (const entry of entries) {
+            entry.disposed = true;
+            release(() => entry.catalogController?.abort());
+            release(() => entry.thumbnailController?.abort());
+            release(() => entry.parseController?.abort());
+        }
+        for (const list of this.watchers.values()) { list.forEach(w => release(() => w.dispose())); }
         this.watchers.clear();
-        for (const list of this.viewers.values()) { list.forEach(v => v.parseController?.abort()); }
-        for (const controller of this.builds.values()) { controller.abort(); }
+        return this.shutdownPromise;
+    }
+
+    dispose(): void {
+        void this.shutdown().catch(error => this.output.appendLine('[shutdown] ' + String(error)));
     }
 
     private watchFile(uri: vscode.Uri): void {
