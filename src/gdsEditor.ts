@@ -695,8 +695,18 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
     // Loading / reloading layouts
     // ------------------------------------------------------------------
 
-    private async loadGds(entry: ViewerEntry, restoreImage = false): Promise<void> {
-        if (this.shuttingDown || entry.disposed) return;
+    private parseTasks = new Set<Promise<void>>();
+
+    private loadGds(entry: ViewerEntry, restoreImage = false): Promise<void> {
+        if (this.shuttingDown || entry.disposed) return Promise.resolve();
+        const task = this.loadGdsData(entry, restoreImage);
+        this.parseTasks.add(task);
+        const remove = () => this.parseTasks.delete(task);
+        void task.then(remove, remove);
+        return task;
+    }
+
+    private async loadGdsData(entry: ViewerEntry, restoreImage: boolean): Promise<void> {
         await this.state.ready();
         if (this.shuttingDown || entry.disposed) return;
         if (this.state.warning && !this.storeWarningShown) {
@@ -710,10 +720,12 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
         }
         if (entry.disposed) { return; }
         entry.loading = true; entry.snapshotReady = false;
-        await entry.panel.webview.postMessage({ type: 'layoutLoading' });
         entry.parseController = new AbortController();
         try {
+            await entry.panel.webview.postMessage({ type: 'layoutLoading' });
+            if (entry.disposed || entry.parseController.signal.aborted) return;
             const gdsBytes = await fs.promises.readFile(entry.gdsPath);
+            if (entry.disposed) return;
             const gdsHash = createHash('sha256').update(gdsBytes).digest('hex');
             const isInitial = !entry.loadedGdsOnce;
             const changed = !!entry.gdsHash && entry.gdsHash !== gdsHash;
@@ -727,15 +739,16 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
                 this.context.extensionUri.fsPath,
                 entry.parseController.signal
             );
+            if (entry.disposed) return;
             for (const warning of warnings || []) { this.output.appendLine('[provenance] ' + warning); }
             const parsedBytes = await fs.promises.readFile(entry.gdsPath);
+            if (entry.disposed) return;
             const parsedHash = createHash('sha256').update(parsedBytes).digest('hex');
             if (parsedHash !== gdsHash) {
                 this.output.appendLine(`GDS changed while parsing; discarding stale parse for ${entry.gdsPath}`);
                 entry.reloadPending = true;
                 return;
             }
-            if (entry.disposed) { return; }
             entry.gdsHash = gdsHash;
             entry.lastSelection = [];
             entry.topCell = (geojson as any).top_cell;
@@ -753,12 +766,15 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
                     geometry: { type: 'Point', coordinates: port.center }, provenance: port.provenance || {}, port });
             }
             await this.workspaceWrites?.catch(() => undefined);
+            if (entry.disposed) return;
             const savedReview = this.state.get<ReviewState>(this.reviewKey(entry.gdsPath));
             entry.reviewStateInvalid = savedReview !== undefined && !validateReviewState(savedReview);
             entry.reviewState = entry.reviewStateInvalid ? { version: 1, bookmarks: [], measurements: [] } : (validateReviewState(savedReview) ? savedReview : { version: 1, bookmarks: [], measurements: [] });
             const baseline = await this.reviewSnapshots.record(entry.gdsPath, gdsHash, (geojson as any).features || []);
+            if (entry.disposed) return;
             const pythonFile = this.getAssociatedScript(entry.gdsPath) || deriveScriptFromSidecar(entry.gdsPath) || '';
             await this.workspaceWrites;
+            if (entry.disposed) return;
             entry.snapshotReady = true;
             await entry.panel.webview.postMessage({
                 type: 'loadGds',
@@ -770,14 +786,23 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
                 warnings,
                 layoutHash: gdsHash,
             });
+            if (entry.disposed) return;
             await entry.panel.webview.postMessage({ type: 'reviewState', gdsPath: entry.gdsPath, layoutHash: gdsHash, state: entry.reviewState, warning: entry.reviewStateInvalid ? 'Persisted review state is invalid and was preserved.' : undefined });
+            if (entry.disposed) return;
             await entry.panel.webview.postMessage({ type: 'reviewBaseline', gdsPath: entry.gdsPath, layoutHash: gdsHash, previousHash: baseline.previousHash, features: baseline.features, status: baseline.status });
+            if (entry.disposed) return;
             entry.loadedGdsOnce = true;
             await this.sendInstructions(entry);
+            if (entry.disposed) return;
             if (isInitial || restoreImage) {
                 await this.restoreSavedImage(entry, gdsHash);
             }
         } catch (err: any) {
+            if (err?.shutdownError) {
+                entry.reloadPending = false;
+                this.output.appendLine('[shutdown] ' + String(err.message || err));
+                throw err;
+            }
             if (entry.disposed) { return; }
             const detail = err?.message || String(err);
             this.output.appendLine(`Failed to parse ${entry.gdsPath}: ${detail}`);
@@ -1302,14 +1327,14 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
     // File watching — reload when the .gds or its sidecar changes
     // ------------------------------------------------------------------
 
-    /** Stop accepting builds and drain owned build work before deactivation. */
+    /** Stop accepting builds and layout loads, then drain their owned work. */
     shutdown(): Promise<void> {
         if (this.shutdownPromise) return this.shutdownPromise;
         this.shuttingDown = true;
         const failures: unknown[] = [];
         this.shutdownPromise = Promise.resolve().then(async () => {
-            const results = await Promise.allSettled([...this.buildTasks]);
-            for (const result of results) if (result.status === 'rejected') failures.push(result.reason);
+            const results = await Promise.allSettled([...this.buildTasks, ...this.parseTasks]);
+            for (const result of results) if (result.status === 'rejected' && !failures.includes(result.reason)) failures.push(result.reason);
             try { await this.workspaceWrites; } catch (error) { failures.push(error); }
             try { await this.shutdownUsage(); } catch (error) { failures.push(error); }
             if (failures.length) throw new AggregateError(failures, 'Could not complete GDS build shutdown: ' + failures.map(error => error instanceof Error ? error.message : String(error)).join('; '));

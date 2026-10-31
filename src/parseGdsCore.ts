@@ -31,7 +31,12 @@ export function parseGdsFileCore(pythonPath: string, gdsPath: string, extensionD
             terminationError = error;
             cleanup();
             stdout = '';
-            void child.terminate().then(() => fail(error), stopError => fail(new Error(`${error.message}; ${stopError.message}`)));
+            void child.terminate().then(() => fail(error), stopError => {
+                const detail = stopError instanceof Error ? stopError.message : String(stopError);
+                const failure = new Error(`${error.message}; ${detail}`) as Error & { shutdownError: string };
+                failure.shutdownError = detail;
+                fail(failure);
+            });
         };
         const abort = () => requestTermination(new Error('GDS parse cancelled'));
         const outputLimit = () => requestTermination(new Error(`parse_gds.py output exceeded ${MAX_OUTPUT_BYTES} bytes`));

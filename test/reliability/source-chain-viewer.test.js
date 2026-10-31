@@ -123,6 +123,9 @@ async function run() {
     await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal(await page.evaluate(() => selectedFeatures.getArray().length), 0, 'malformed numeric frame must not be source-selectable');
 
+    // Source selection animates the view. Wait for the resulting viewport
+    // before opening a menu that deliberately closes when the map moves.
+    await page.waitForFunction(() => !map.getView().getAnimating() && !map.getView().getInteracting());
     const pixel = await page.evaluate(() => {
       map.renderSync();
       const point = map.getPixelFromCoordinate([5, 5]);
@@ -130,7 +133,7 @@ async function run() {
       return [point[0] + rect.left, point[1] + rect.top];
     });
     await page.mouse.click(...pixel, { button: 'right' });
-    await page.waitForSelector('#canvas-context-menu', { visible: true });
+    await page.waitForSelector('#canvas-context-menu [data-action="review-more"]', { visible: true });
     await page.click('#canvas-context-menu [data-action="review-more"]');
     await page.waitForFunction(() => !document.querySelector('#canvas-context-menu [data-action="source-navigation"]')?.hidden);
     await page.click('#canvas-context-menu [data-action="source-navigation"]');
