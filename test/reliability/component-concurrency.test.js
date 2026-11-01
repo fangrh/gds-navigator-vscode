@@ -49,7 +49,11 @@ try {
         const cached = await loadComponentCatalog(python); assert.equal(cached.environment.id, 'fresh', 'older forced completion overwrote fresh cache'); assert.equal(jobs.length, 3, 'fresh forced result was not cached');
 
         const abortRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gds-component-abort-')); const survivorAbort = new AbortController(), survivor = loadComponentCatalog(python, survivorAbort.signal, abortRoot); const survivorPeer = loadComponentCatalog(python, undefined, abortRoot); await waitForJobs(4); survivorAbort.abort(); await assert.rejects(survivor, /cancelled/); assert.equal(jobs[3].proc.killed, false, 'one subscriber abort killed shared child'); finish(jobs[3], catalogPayload('survivor')); await survivorPeer;
-        const allAbort = new AbortController(); const canceled = loadComponentCatalog(python, allAbort.signal, abortRoot, true); await waitForJobs(5); allAbort.abort(); await assert.rejects(canceled, /cancelled/); assert.equal(jobs[4].proc.killed, true, 'last subscriber abort did not kill child');
+        const allAbort = new AbortController(); const canceled = loadComponentCatalog(python, allAbort.signal, abortRoot, true); await waitForJobs(5); allAbort.abort();
+        let canceledSettled = false; canceled.catch(() => { canceledSettled = true; });
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(canceledSettled, false, 'last subscriber must wait for the controlled child close');
+        jobs[4].proc.emit('close', null); await assert.rejects(canceled, /cancelled/);
         const retry = loadComponentCatalog(python, undefined, undefined, true); await waitForJobs(6); finish(jobs[5], catalogPayload('retry')); await retry;
 
         const failed = loadComponentCatalog(python, undefined, undefined, true); await waitForJobs(7); fail(jobs[6]); await assert.rejects(failed, /component catalog failed|temporary failure/);

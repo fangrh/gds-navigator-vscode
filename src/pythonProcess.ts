@@ -1,15 +1,16 @@
-import { execFile, spawn, SpawnOptionsWithoutStdio } from 'child_process';
+import { execFile, spawn, SpawnOptionsWithoutStdio, SpawnOptionsWithStdioTuple, ChildProcessByStdio } from 'child_process';
+import type { Readable, Writable } from 'stream';
 
 const STOP_GRACE_MS = 1000;
 const STOP_KILL_MS = 2000;
 
 /** Each POSIX invocation owns its process group, including ordinary subprocesses. */
-export function spawnPythonProcess(pythonPath: string, args: string[], options: SpawnOptionsWithoutStdio = {}) {
+export function spawnPythonProcess(pythonPath: string, args: string[], options: SpawnOptionsWithoutStdio | SpawnOptionsWithStdioTuple<'ignore', 'pipe', 'pipe'> = {}) {
     const proc = spawn(pythonPath, args, {
         ...options,
         windowsHide: true,
         detached: process.platform !== 'win32',
-    });
+    }) as ChildProcessByStdio<Writable | null, Readable, Readable>;
     let closed = false;
     let stopping: Promise<void> | undefined;
     proc.once('close', () => { closed = true; });

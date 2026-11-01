@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawnPythonProcess } from './pythonProcess';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -126,17 +126,27 @@ function refreshScope(python: string, projectRoot?: string): void {
 function run(python: string, args: string[], signal?: AbortSignal, projectRoot?: string): Promise<any> {
     if (signal?.aborted) return Promise.reject(new Error('component catalog request cancelled'));
     return new Promise((resolve, reject) => {
-        const proc = spawn(python, [scriptPath(), ...args, ...(projectRoot ? ['--project-root', path.resolve(projectRoot)] : [])], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-        let output = ''; let error = ''; let bytes = 0; let settled = false;
-        const terminate = () => { if (process.platform === 'win32' && proc.pid) spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true }).on('error', () => proc.kill()); else proc.kill(); };
+        const child = spawnPythonProcess(python, [scriptPath(), ...args, ...(projectRoot ? ['--project-root', path.resolve(projectRoot)] : [])], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const { proc } = child;
+        let output = ''; let error = ''; let bytes = 0; let settled = false; let stopping = false;
         const finish = (fn: (value: any) => void, value: any) => { if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener('abort', abort); fn(value); };
-        const abort = () => { terminate(); finish(reject, new Error('component catalog request cancelled')); };
-        const timer = setTimeout(() => { terminate(); finish(reject, new Error('component catalog request timed out')); }, TIMEOUT_MS);
-        if (signal) { if (signal.aborted) { abort(); return; } signal.addEventListener('abort', abort, { once: true }); }
-        proc.stdout.on('data', chunk => { bytes += chunk.byteLength; if (bytes > MAX_OUTPUT_BYTES) { terminate(); finish(reject, new Error('component catalog output exceeded limit')); } else output += chunk.toString(); });
-        proc.stderr.on('data', chunk => { bytes += chunk.byteLength; if (bytes > MAX_OUTPUT_BYTES) { terminate(); finish(reject, new Error('component catalog output exceeded limit')); return; } error = (error + chunk.toString()).slice(-8192); });
-        proc.on('error', err => finish(reject, new Error(`Could not start component catalog Python: ${err.message}`)));
-        proc.on('close', code => { if (settled) return; if (code !== 0) { try { const parsed = JSON.parse(output); finish(reject, new Error(String(parsed.error || error || 'component catalog failed'))); } catch { finish(reject, new Error(error || 'component catalog failed')); } return; } try { const parsed = JSON.parse(output); if (parsed.error) throw new Error(String(parsed.error)); finish(resolve, parsed); } catch (err) { finish(reject, err); } });
+        const stop = (reason: Error) => {
+            if (settled || stopping) return;
+            stopping = true; output = ''; clearTimeout(timer); signal?.removeEventListener('abort', abort);
+            void child.terminate().then(() => finish(reject, reason), stopError => {
+                const detail = stopError instanceof Error ? stopError.message : String(stopError);
+                const failure = new Error(`${reason.message}; ${detail}`) as Error & { shutdownError: string };
+                failure.shutdownError = detail;
+                finish(reject, failure);
+            });
+        };
+        const abort = () => stop(new Error('component catalog request cancelled'));
+        const timer = setTimeout(() => stop(new Error('component catalog request timed out')), TIMEOUT_MS);
+        proc.stdout.on('data', chunk => { if (settled || stopping) return; bytes += chunk.byteLength; if (bytes > MAX_OUTPUT_BYTES) { stop(new Error('component catalog output exceeded limit')); } else output += chunk.toString(); });
+        proc.stderr.on('data', chunk => { if (settled || stopping) return; bytes += chunk.byteLength; if (bytes > MAX_OUTPUT_BYTES) { stop(new Error('component catalog output exceeded limit')); return; } error = (error + chunk.toString()).slice(-8192); });
+        proc.on('error', err => { if (!stopping) finish(reject, new Error(`Could not start component catalog Python: ${err.message}`)); });
+        proc.on('close', code => { if (settled || stopping) return; if (code !== 0) { try { const parsed = JSON.parse(output); finish(reject, new Error(String(parsed.error || error || 'component catalog failed'))); } catch { finish(reject, new Error(error || 'component catalog failed')); } return; } try { const parsed = JSON.parse(output); if (parsed.error) throw new Error(String(parsed.error)); finish(resolve, parsed); } catch (err) { finish(reject, err); } });
+        if (signal) { signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort(); }
     });
 }
 
@@ -153,15 +163,32 @@ function sharedRun<T>(key: string, start: (signal: AbortSignal) => Promise<T>, s
         pendingRuns.set(key, pending);
     }
     pending.subscribers++;
+    const owned = pending;
     return new Promise<T>((resolve, reject) => {
         let settled = false;
-        const finish = (fn: (value: any) => void, value: any) => {
-            if (settled) return; settled = true; signal?.removeEventListener('abort', abort); pending!.subscribers--; fn(value);
-            if (pending!.subscribers === 0) { if (pendingRuns.get(key) === pending) pendingRuns.delete(key); pending!.controller.abort(); }
+        const release = () => {
+            signal?.removeEventListener('abort', abort); owned.subscribers--;
+            if (owned.subscribers !== 0) return false;
+            if (pendingRuns.get(key) === owned) pendingRuns.delete(key);
+            owned.controller.abort();
+            return true;
         };
-        const abort = () => finish(reject, new Error('component catalog request cancelled'));
+        const finish = (fn: (value: any) => void, value: any) => {
+            if (settled) return; settled = true; release(); fn(value);
+        };
+        const abort = () => {
+            if (settled) return;
+            settled = true;
+            const last = release();
+            const cancelled = new Error('component catalog request cancelled');
+            if (!last) { reject(cancelled); return; }
+            // Only the final subscriber owns cancellation of the shared child.
+            // Keep its request pending until that child has finished cleanup.
+            void owned.promise.then(() => reject(cancelled), error => reject(error?.shutdownError ? error : cancelled));
+        };
         if (signal) signal.addEventListener('abort', abort, { once: true });
-        pending!.promise.then(value => { if (settled) return; try { finish(resolve, clone(value)); } catch (error) { finish(reject, error); } }, error => { if (!settled) finish(reject, error); });
+        owned.promise.then(value => { if (settled) return; try { finish(resolve, clone(value)); } catch (error) { finish(reject, error); } }, error => { if (!settled) finish(reject, error); });
+        if (signal?.aborted) abort();
     });
 }
 

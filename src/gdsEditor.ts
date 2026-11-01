@@ -283,7 +283,23 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
     // Message protocol with the webview
     // ------------------------------------------------------------------
 
-    private async onMessage(entry: ViewerEntry, message: any): Promise<void> {
+    private componentTasks = new Set<Promise<void>>();
+
+    private isComponentRequest(message: any): boolean {
+        return message?.type === 'requestComponentCatalog' || message?.type === 'previewComponent' || message?.type === 'requestComponentThumbnails';
+    }
+
+    private onMessage(entry: ViewerEntry, message: any): Promise<void> {
+        if (!this.isComponentRequest(message)) return this.handleMessage(entry, message);
+        if (this.shuttingDown || entry.disposed) return Promise.resolve();
+        const task = this.handleMessage(entry, message);
+        this.componentTasks.add(task);
+        const remove = () => this.componentTasks.delete(task);
+        void task.then(remove, remove);
+        return task;
+    }
+
+    private async handleMessage(entry: ViewerEntry, message: any): Promise<void> {
         if (message?.type === 'usageEvent') {
             if (!entry.disposed && ['ui.control', 'ui.change', 'ui.shortcut', 'view.wheel', 'image.align', 'draw.complete', 'shape.edit', 'selection.change'].includes(message.action)) {
                 this.recordUsage(entry, message.action, { source: 'viewer', phase: message.phase,
@@ -294,6 +310,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
         }
         if (message?.type === 'usageLogs') { await this.commandUsageLogs(entry); return; }
         await this.state.ready();
+        if (this.isComponentRequest(message) && (this.shuttingDown || entry.disposed)) return;
         console.log('[gds-navigator] msg:', message && message.type);
         this.output.appendLine(`[msg] ${message && message.type} (yaml ${typeof (message && message.yaml) === 'string' ? message.yaml.length : '-'})`);
         switch (message.type) {
@@ -309,6 +326,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
                     this.recordUsage(entry, 'catalog.thumbnails', { phase: 'result', outcome: controller.signal.aborted || entry.disposed ? 'cancelled' : 'success', durationMs: Date.now() - started });
                     if (!entry.disposed && entry.thumbnailController === controller) await entry.panel.webview.postMessage({ type: 'componentThumbnails', requestId: message.requestId, result });
                 } catch (error: any) {
+                    if (error?.shutdownError) { this.output.appendLine('[shutdown] ' + String(error.message || error)); throw error; }
                     this.recordUsage(entry, 'catalog.thumbnails', { phase: 'result', outcome: controller.signal.aborted ? 'cancelled' : 'failure', durationMs: Date.now() - started });
                     if (!entry.disposed && entry.thumbnailController === controller) await entry.panel.webview.postMessage({ type: 'componentError', requestId: message.requestId, error: error.message });
                 }
@@ -333,6 +351,7 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
                     this.recordUsage(entry, usageAction, { phase: 'result', outcome: controller.signal.aborted || entry.disposed ? 'cancelled' : 'success', durationMs: Date.now() - started });
                     if (!entry.disposed && entry.catalogController === controller) await entry.panel.webview.postMessage({ type: message.type === 'requestComponentCatalog' ? 'componentCatalog' : 'componentPreview', requestId: message.requestId, result });
                 } catch (error: any) {
+                    if (error?.shutdownError) { this.output.appendLine('[shutdown] ' + String(error.message || error)); throw error; }
                     this.recordUsage(entry, usageAction, { phase: 'result', outcome: controller.signal.aborted ? 'cancelled' : 'failure', durationMs: Date.now() - started });
                     if (!entry.disposed && entry.catalogController === controller) await entry.panel.webview.postMessage({ type: 'componentError', requestId: message.requestId, error: error.message });
                 }
@@ -1327,13 +1346,13 @@ export class GdsEditorProvider implements vscode.CustomReadonlyEditorProvider<vs
     // File watching — reload when the .gds or its sidecar changes
     // ------------------------------------------------------------------
 
-    /** Stop accepting builds and layout loads, then drain their owned work. */
+    /** Stop accepting Python work, then drain owned builds, loads and component requests. */
     shutdown(): Promise<void> {
         if (this.shutdownPromise) return this.shutdownPromise;
         this.shuttingDown = true;
         const failures: unknown[] = [];
         this.shutdownPromise = Promise.resolve().then(async () => {
-            const results = await Promise.allSettled([...this.buildTasks, ...this.parseTasks]);
+            const results = await Promise.allSettled([...this.buildTasks, ...this.parseTasks, ...this.componentTasks]);
             for (const result of results) if (result.status === 'rejected' && !failures.includes(result.reason)) failures.push(result.reason);
             try { await this.workspaceWrites; } catch (error) { failures.push(error); }
             try { await this.shutdownUsage(); } catch (error) { failures.push(error); }

@@ -58,12 +58,13 @@ const vscode = {
 async function main() {
   esbuild.buildSync({ entryPoints: [path.join(ROOT, 'src', 'gdsEditor.ts')], bundle: true, platform: 'node', format: 'cjs', external: ['vscode'], outfile: bundle });
   const originalLoad = Module._load;
+  let provider;
   try {
     Module._load = function (name, ...args) { return name === 'vscode' ? vscode : originalLoad.call(this, name, ...args); };
     const { GdsEditorProvider } = require(bundle);
     const env = { ready: async () => {}, getPython: () => python, setActiveFile() {} };
     const context = { extensionUri: { fsPath: ROOT }, globalStorageUri: { fsPath: path.join(temp, 'storage') }, workspaceState: { get: (key) => values.get(key), update: async (key, value) => { if (value === undefined) values.delete(key); else values.set(key, value); } } };
-    const provider = new GdsEditorProvider(context, env, { appendLine() {}, show() {} });
+    provider = new GdsEditorProvider(context, env, { appendLine() {}, show() {} });
     const messages = [];
     const entry = { gdsPath, gdsHash: 'layout-hash', loading: false, disposed: false, lastSelection: [], panel: { webview: { postMessage: async (message) => { messages.push(message); return true; } } } };
 
@@ -100,6 +101,7 @@ async function main() {
     assert(!standaloneCatalog.result.components.some((item) => item.name.startsWith('project:')), 'standalone catalog loaded project components');
     console.log(JSON.stringify({ status: 'passed', trustGate: true, workspaceRootBound: true, forgedRootIgnored: true, standaloneBuiltinOnly: true, previewPayload: true }));
   } finally {
+    if (provider) await provider.shutdown();
     Module._load = originalLoad;
     fs.rmSync(temp, { recursive: true, force: true });
   }

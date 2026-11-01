@@ -22,7 +22,9 @@ async function main(){
     assert.equal((await api.loadComponentCatalog(python)).environment.id,'normal');assert.equal(jobs.length,1,'first normal request did not seed cache');
     const aborted=new AbortController();aborted.abort();await assert.rejects(api.loadComponentCatalog(python,aborted.signal),/cancelled/);assert.equal(jobs.length,1);
     const refresh=api.loadComponentCatalog(python,undefined,undefined,true),peer=api.loadComponentCatalog(python);assert.equal(jobs.length,2,'normal caller reused stale completed cache during refresh');complete(1,'refresh');assert.equal((await peer).environment.id,'refresh');await refresh;
-    const oldAbort=new AbortController();const superseded=api.loadComponentCatalog(python,oldAbort.signal,undefined,true);const current=api.loadComponentCatalog(python,undefined,undefined,true);assert.equal(jobs.length,4);oldAbort.abort();await assert.rejects(superseded,/cancelled/);assert(jobs[2].p.killed,'replaced abandoned child remained alive');assert(!jobs[3].p.killed);complete(3,'current');await current;
+    const oldAbort=new AbortController();const superseded=api.loadComponentCatalog(python,oldAbort.signal,undefined,true);const current=api.loadComponentCatalog(python,undefined,undefined,true);assert.equal(jobs.length,4);oldAbort.abort();
+    let supersededSettled=false;superseded.catch(()=>{supersededSettled=true;});await new Promise(resolve=>setImmediate(resolve));
+    assert(!supersededSettled,'superseded request must wait for its controlled child close');jobs[2].p.emit('close',null);await assert.rejects(superseded,/cancelled/);assert(!jobs[3].p.killed);complete(3,'current');await current;
     const older=api.loadComponentCatalog(python,undefined,undefined,true);const olderIndex=jobs.length-1;
     for(let i=0;i<12;i++){const root=path.join(temp,'root-'+i);fs.mkdirSync(root);const pending=api.loadComponentCatalog(python,undefined,root);complete(jobs.length-1,'other-'+i);await pending;}
     const latest=api.loadComponentCatalog(python,undefined,undefined,true);complete(jobs.length-1,'latest');await latest;complete(olderIndex,'older');await older;

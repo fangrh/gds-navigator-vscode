@@ -23,6 +23,7 @@ routes.yaml
 RESEARCH_MAP.md
 tmp-*.cjs
 .project-components-*/**
+.provider-components-*/**
 .project-components-*.cjs
 .broken-components-*/**
 esbuild*.mjs

@@ -5,7 +5,9 @@ const cp = require('child_process');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
+const os = require('os');
 const puppeteer = require('puppeteer-core');
+const { closeOwnedBrowser } = require('../../scripts/process-cleanup.cjs');
 const ROOT = path.resolve(__dirname, '../..');
 const browserCache = path.join(process.env.LOCALAPPDATA || '', 'ms-playwright');
 const headlessBrowsers = fs.existsSync(browserCache) ? fs.readdirSync(browserCache).filter(name=>name.startsWith('chromium_headless_shell-')).sort().reverse().map(name=>path.join(browserCache,name,'chrome-headless-shell-win64/chrome-headless-shell.exe')) : [];
@@ -15,9 +17,12 @@ function server() { return new Promise(resolve => { const s = http.createServer(
 const PREVIEW = { name: 'alpha', settings: {}, geojson: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'MultiPolygon', coordinates: [[[[0, 0], [8, 0], [8, 3], [0, 3], [0, 0]], [[2, 1], [3, 1], [3, 2], [2, 2], [2, 1]]], [[[12, 0], [16, 0], [16, 4], [12, 4], [12, 0]]]] } }, { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[20, 0], [24, 0], [24, 4], [20, 4], [20, 0]]] } }] }, ports: [] };
 async function main() {
   cp.execFileSync(process.execPath, [path.join(ROOT, 'scripts/make-standalone.js')], { cwd: ROOT, stdio: 'inherit', windowsHide: true });
-  const out = path.join(ROOT, 'logs/reliability/component-catalog'); fs.mkdirSync(out, { recursive: true }); const { s, port } = await server(); let browser;
+  const out = path.resolve(process.env.GDS_COMPONENT_VIEWER_REPORT_DIR || path.join(ROOT, 'logs/reliability/component-catalog')); fs.mkdirSync(out, { recursive: true });
+  const privateRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'gds-component-viewer-')));
+  const profile = path.join(privateRoot, 'browser-profile');
+  const { s, port } = await server(); let browser;
   try {
-    browser = await puppeteer.launch({ executablePath: BROWSER, headless: true, args: ['--no-first-run'] });
+    browser = await puppeteer.launch({ executablePath: BROWSER, headless: true, userDataDir: profile, args: ['--no-first-run'] });
     const page = await browser.newPage(); await page.setViewport({ width: 1400, height: 950 }); const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.goto(`http://127.0.0.1:${port}/webview/test-standalone.html?data=/test/fixtures/real_geojson`, { waitUntil: 'networkidle0' }); await page.waitForFunction(() => window.__viewerReady && allFeatures.length > 0, { timeout: 10000 });
     await page.click('#shape-menu-btn'); await page.waitForSelector('#component-catalog [role=listbox]');
@@ -137,6 +142,14 @@ async function main() {
     await page.waitForFunction(()=>document.querySelectorAll('#component-catalog .component-card-thumb svg').length===2);
     fs.writeFileSync(path.join(out,'project-workflow.json'),JSON.stringify({status:'passed',realGds:true,ports:2,customWorkOrder:true,refreshNewEntry:true,refreshCancelsDraft:true},null,2));
     await page.screenshot({ path: path.join(out, 'viewer.png') }); assert.deepEqual(errors, []); fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify({ status: 'passed', sortedCards: true, visibleIconsBeforeSelection: true, autoPreview: true, geometryThumbnail: true, cachedRevisit: true, canvasPlacement: true, unplacedTabEdits: true, workOrderPayload: true, cancelPlacement: true, groupedProperties: true }, null, 2)); console.log('Component catalog browser interactions passed');
-  } finally { if (browser) await browser.close(); await new Promise(resolve => s.close(resolve)); }
+  } finally {
+    let cleanup; let cleanupError;
+    try { if (browser) cleanup = await closeOwnedBrowser(browser, { profileDir: profile }); }
+    catch (error) { cleanupError = error; }
+    finally { await new Promise(resolve => s.close(resolve)); }
+    fs.writeFileSync(path.join(out, 'shutdown.json'), JSON.stringify({ browser: cleanup || null, error: cleanupError ? String(cleanupError) : null }, null, 2));
+    if (cleanupError) throw cleanupError;
+    if (cleanup?.verified) fs.rmSync(privateRoot, { recursive: true, force: true });
+  }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
