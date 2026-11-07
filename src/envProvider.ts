@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { readProjectEnvironment, saveProjectEnvironment } from './projectEnvironment';
@@ -126,6 +125,13 @@ export class EnvProvider {
     private statusBar: vscode.StatusBarItem;
     private automatic?: { python: string; provenance: boolean };
     private detection?: Promise<void>;
+    private detections = new Map<Promise<void>, AbortController>();
+    private condaTasks = new Set<Promise<CondaEnv[]>>();
+    private readonly condaController = new AbortController();
+    private readonly shutdownFailures = new Set<unknown>();
+    private readonly configurationSubscription: vscode.Disposable;
+    private closing = false;
+    private shutdownPromise?: Promise<void>;
     private generation = 0;
     private detected = false;
     private selecting = false;
@@ -133,21 +139,22 @@ export class EnvProvider {
     private setupPromises = new Map<string, Promise<void>>();
     private promptedRoots = new Set<string>();
     private activeFile?: string;
-    private readonly probe: (python: string, timeoutMs?: number) => Promise<PythonDiagnostics>;
+    private readonly probe: (python: string, timeoutMs?: number, signal?: AbortSignal) => Promise<PythonDiagnostics>;
     constructor(private context: vscode.ExtensionContext, private options?: {
-        probe?: (python: string, timeoutMs?: number) => Promise<PythonDiagnostics>;
+        probe?: (python: string, timeoutMs?: number, signal?: AbortSignal) => Promise<PythonDiagnostics>;
         discover?: () => Promise<string[]>;
     }) {
         this.probe = options?.probe || inspectPython;
         this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 90);
         this.statusBar.command = 'gdsNavigator.selectPythonEnv';
-        context.subscriptions.push(this.statusBar, vscode.workspace.onDidChangeConfiguration(event => {
-            if (!this.selecting && (event.affectsConfiguration('gdsNavigator.pythonPath') || event.affectsConfiguration('python.defaultInterpreterPath'))) {
+        this.configurationSubscription = vscode.workspace.onDidChangeConfiguration(event => {
+            if (!this.closing && !this.selecting && (event.affectsConfiguration('gdsNavigator.pythonPath') || event.affectsConfiguration('python.defaultInterpreterPath'))) {
                 this.manualOverride = undefined;
                 this.invalidateAutomatic();
-                void this.ready();
+                void this.ready().catch(error => console.error('[environment] ' + String(error)));
             }
-        }));
+        });
+        context.subscriptions.push(this.statusBar, this.configurationSubscription);
         this.updateStatusBar();
     }
     private config(file?: string) {
@@ -167,40 +174,47 @@ export class EnvProvider {
         return this.manualOverride || this.config().get<string>('pythonPath', '').trim()
             || this.context.workspaceState.get<string>(MANUAL_KEY) || '';
     }
-    setActiveFile(file?: string): void { this.activeFile = file; this.updateStatusBar(); }
+    setActiveFile(file?: string): void { if (!this.closing) { this.activeFile = file; this.updateStatusBar(); } }
     getPython(file = this.activeFile): string { return this.explicit(file) || this.automatic?.python || 'python'; }
     ready(file?: string): Promise<void> {
-        if (this.explicit(file) || this.detected) return Promise.resolve();
+        if (this.closing || this.explicit(file) || this.detected) return Promise.resolve();
         if (this.detection) return this.detection;
         const generation = this.generation;
-        const pending: Promise<void> = this.detect(generation).catch(() => {
-            if (generation === this.generation) this.detected = true;
+        const controller = new AbortController();
+        const pending: Promise<void> = this.detect(generation, controller.signal).catch(error => {
+            if (error?.shutdownError) { this.shutdownFailures.add(error); throw error; }
+            if (!this.closing && generation === this.generation) this.detected = true;
         }).then(async () => {
             // Consumers waiting on a superseded scan must wait for the replacement too.
-            if (generation !== this.generation && !this.explicit()) await this.ready();
+            if (!this.closing && generation !== this.generation && !this.explicit()) await this.ready();
         }).finally(() => {
+            this.detections.delete(pending);
             if (this.detection === pending) { this.detection = undefined; this.updateStatusBar(); }
         });
+        this.detections.set(pending, controller);
         this.detection = pending; this.updateStatusBar();
         return pending;
     }
     invalidateAutomatic(): void {
+        if (this.closing) return;
         this.generation++; this.automatic = undefined; this.detected = false; this.detection = undefined;
+        for (const controller of [...this.detections.values()]) controller.abort();
         this.updateStatusBar();
     }
-    private async detect(generation: number): Promise<void> {
+    private async detect(generation: number, signal: AbortSignal): Promise<void> {
         const deadline = Date.now() + 30_000;
         const candidates = await (this.options?.discover ? this.options.discover() : discoverPythonCandidates(this.context));
         const seen = new Set<string>();
         let fallback: string | undefined;
-        const current = () => generation === this.generation && !this.explicit();
+        const current = () => !this.closing && !signal.aborted && generation === this.generation && !this.explicit();
         const tryCandidates = async (values: string[]) => {
             for (const candidate of values) {
                 if (!current() || Date.now() >= deadline || seen.size >= 24) return false;
                 const key = process.platform === 'win32' ? candidate.toLowerCase() : candidate;
                 if (seen.has(key)) continue;
                 seen.add(key);
-                const d = await this.probe(candidate, Math.max(1, Math.min(12_000, deadline - Date.now())));
+                const d = await this.probe(candidate, Math.max(1, Math.min(12_000, deadline - Date.now())), signal);
+                if (d.shutdownError) throw Object.assign(new Error(d.error || d.shutdownError), { shutdownError: d.shutdownError });
                 if (!current()) return false;
                 if (!d.error && d.klayout?.path && !d.klayout.error) {
                     fallback ||= candidate;
@@ -213,7 +227,7 @@ export class EnvProvider {
         };
         let found = await tryCandidates(candidates);
         if (!found && current() && !this.options?.discover && Date.now() < deadline) {
-            const conda = await this.listCondaEnvs(Math.min(3000, deadline - Date.now()));
+            const conda = await this.listCondaEnvs(Math.min(3000, deadline - Date.now()), signal);
             found = await tryCandidates([...conda.map(env => pythonInPrefix(env.prefix)).filter(p => fs.existsSync(p)), 'python']);
         }
         if (current()) {
@@ -222,6 +236,7 @@ export class EnvProvider {
         }
     }
     async setPython(pythonPath: string, file?: string): Promise<void> {
+        if (this.closing) return;
         // Publish the user's choice synchronously before any pending probe returns.
         this.manualOverride = pythonPath; this.invalidateAutomatic(); this.selecting = true;
         try {
@@ -234,6 +249,7 @@ export class EnvProvider {
         } finally { this.selecting = false; this.updateStatusBar(); }
     }
     async clearManualSelection(file?: string): Promise<void> {
+        if (this.closing) return;
         this.selecting = true;
         try {
             await this.context.workspaceState.update(MANUAL_KEY, undefined);
@@ -243,36 +259,90 @@ export class EnvProvider {
             this.manualOverride = undefined; this.invalidateAutomatic();
         } finally { this.selecting = false; }
         await this.ready();
+        if (this.closing) return;
         const root = this.folderFor(file);
         if (root && readProjectEnvironment(root)) await this.persistProject(root, file, await this.probe(this.automatic?.python || 'python'));
     }
     private updateStatusBar(): void {
+        if (this.closing) return;
         const mode = this.explicit(this.activeFile) ? 'manual' : this.detection ? 'detecting' : this.automatic?.provenance ? 'auto · provenance'
             : this.automatic ? 'auto · KLayout only' : 'auto · unavailable';
         this.statusBar.text = `$(circuit-board) GDS Python: ${mode}`;
         this.statusBar.tooltip = `Python: ${this.getPython()}\n${mode}\nClick to choose manually or use Automatic.`;
         this.statusBar.show();
     }
-    async listCondaEnvs(timeoutMs = 3000): Promise<CondaEnv[]> {
-        return new Promise(resolve => {
-            const proc = spawn('conda', ['env', 'list', '--json'], { windowsHide: true });
-            let out = '', bytes = 0, settled = false;
-            const finish = (items: CondaEnv[]) => { if (!settled) { settled = true; clearTimeout(timer); resolve(items); } };
-            const timer = setTimeout(() => { proc.kill(); finish([]); }, timeoutMs);
-            proc.stdout.on('data', data => { bytes += data.length; if (bytes > 128 * 1024) { proc.kill(); finish([]); } else out += data.toString(); });
+    shutdown(): Promise<void> {
+        if (this.shutdownPromise) return this.shutdownPromise;
+        this.closing = true; this.generation++;
+        this.shutdownPromise = Promise.resolve().then(async () => {
+            const results = await Promise.allSettled([...this.detections.keys(), ...this.condaTasks]);
+            for (const result of results) if (result.status === 'rejected') this.shutdownFailures.add(result.reason);
+            if (this.shutdownFailures.size) throw new AggregateError([...this.shutdownFailures], 'Could not complete GDS environment shutdown: '
+                + [...this.shutdownFailures].map(error => error instanceof Error ? error.message : String(error)).join('; '));
+        });
+        const release = (action: () => void) => { try { action(); } catch (error) { this.shutdownFailures.add(error); } };
+        for (const controller of this.detections.values()) release(() => controller.abort());
+        release(() => this.condaController.abort());
+        release(() => this.configurationSubscription.dispose());
+        release(() => this.statusBar.dispose());
+        return this.shutdownPromise;
+    }
+    dispose(): void {
+        void this.shutdown().catch(error => console.error('[environment shutdown] ' + String(error)));
+    }
+    listCondaEnvs(timeoutMs = 3000, signal?: AbortSignal): Promise<CondaEnv[]> {
+        if (this.closing || signal?.aborted) return Promise.resolve([]);
+        const pending = this.readCondaEnvs(timeoutMs, signal).catch(error => {
+            this.shutdownFailures.add(error); throw error;
+        }).finally(() => this.condaTasks.delete(pending));
+        this.condaTasks.add(pending);
+        return pending;
+    }
+    private readCondaEnvs(timeoutMs: number, signal?: AbortSignal): Promise<CondaEnv[]> {
+        return new Promise((resolve, reject) => {
+            const child = spawnPythonProcess('conda', ['env', 'list', '--json']);
+            const { proc } = child;
+            let out = '', bytes = 0, settled = false, stopping = false;
+            const signals = new Set([this.condaController.signal]);
+            if (signal) signals.add(signal);
+            const removeAbort = () => { for (const entry of signals) entry.removeEventListener('abort', stop); };
+            const finish = (items: CondaEnv[]) => {
+                if (settled) return;
+                settled = true; clearTimeout(timer); removeAbort(); resolve(items);
+            };
+            const stop = () => {
+                if (settled || stopping) return;
+                stopping = true; clearTimeout(timer); removeAbort();
+                void child.terminate().then(() => finish([]), error => {
+                    settled = true;
+                    const detail = error instanceof Error ? error.message : String(error);
+                    reject(Object.assign(new Error('Could not stop Conda discovery: ' + detail), { shutdownError: detail }));
+                });
+            };
+            const timer = setTimeout(stop, timeoutMs);
+            proc.stdout.on('data', data => {
+                if (settled || stopping) return;
+                bytes += data.length;
+                if (bytes > 128 * 1024) stop(); else out += data.toString();
+            });
             proc.stderr.on('data', () => {});
-            proc.on('error', () => finish([]));
+            proc.on('error', () => { if (!stopping) finish([]); });
             proc.on('close', () => {
+                if (settled || stopping) return;
                 try {
                     const envs = JSON.parse(out).envs;
                     finish(Array.isArray(envs) ? [...new Set(envs.filter((p): p is string => typeof p === 'string'))].slice(0, 32).map(prefix => ({ name: path.basename(prefix), prefix })) : []);
                 } catch { finish([]); }
             });
+            for (const entry of signals) entry.addEventListener('abort', stop, { once: true });
+            if ([...signals].some(entry => entry.aborted)) stop();
         });
     }
     async pick(file?: string): Promise<void> {
+        if (this.closing) return;
         const local = await discoverPythonCandidates(this.context);
         const conda = await this.listCondaEnvs();
+        if (this.closing) return;
         const paths = [...new Set([this.getPython(file), ...local, ...conda.map(env => pythonInPrefix(env.prefix))])];
         const items: Array<vscode.QuickPickItem & { python?: string }> = [
             { label: '$(zap) Automatic', description: 'Prefer a verified provenance-enabled environment', python: '__auto__' },
@@ -280,11 +350,11 @@ export class EnvProvider {
             { label: '$(edit) Enter Python path manually…' },
         ];
         const chosen = await vscode.window.showQuickPick(items, { placeHolder: 'Choose Python for this workspace' });
-        if (!chosen) return;
+        if (!chosen || this.closing) return;
         try {
             if (chosen.python === '__auto__') { await this.clearManualSelection(file); return; }
             const selected = chosen.python ?? await vscode.window.showInputBox({ prompt: 'Full path to the Python executable', ignoreFocusOut: true });
-            if (!selected) return;
+            if (!selected || this.closing) return;
             const normalized = selected.trim().replace(/^"(.*)"$/, '$1');
             if (normalized !== 'python' && (!fs.existsSync(normalized) || !fs.statSync(normalized).isFile())) throw new Error('Choose an existing Python executable.');
             const root = this.folderFor(file);
@@ -296,6 +366,7 @@ export class EnvProvider {
 
     /** First-open onboarding: one prompt per folder/session; never blocks viewing. */
     setupProject(file?: string, force = false): Promise<void> {
+        if (this.closing) return Promise.resolve();
         const root = this.folderFor(file);
         if (!root || vscode.workspace.isTrusted === false) return Promise.resolve();
         const pending = this.setupPromises.get(root);

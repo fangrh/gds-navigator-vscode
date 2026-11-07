@@ -82,7 +82,7 @@ async function scenario(phase) {
       plugins: [{ name: 'controlled-build-leaves', setup(build) {
         build.onResolve({ filter: /^\.\/(envProvider|pythonRunner)$/ }, args => ({ path: args.path, namespace: 'lifecycle' }));
         build.onLoad({ filter: /.*/, namespace: 'lifecycle' }, args => ({ loader: 'js', contents: args.path.endsWith('envProvider') ? `
-          class EnvProvider { ready() { const f=globalThis.__gdsShutdownHarness; return f.holdEnv ? f.env.promise : Promise.resolve(); } getPython() { return 'controlled-python'; } }
+          class EnvProvider { ready() { const f=globalThis.__gdsShutdownHarness; return f.holdEnv ? f.env.promise : Promise.resolve(); } getPython() { return 'controlled-python'; } shutdown() { return Promise.resolve(); } dispose() {} }
           async function inspectPython(python, timeout, signal) { const f=globalThis.__gdsShutdownHarness; f.diagCount++; f.diagSignal=signal; if(['diagnostics','unverified-diagnostics'].includes(f.phase)) await f.diag.promise; return f.phase==='unverified-diagnostics' ? {executable:python,error:'shutdown unverified',shutdownError:'shutdown unverified'} : {executable:python}; }
           module.exports={EnvProvider,inspectPython};` : `
           async function runPythonScript(python, script, cwd, output, options) { const f=globalThis.__gdsShutdownHarness; f.runCount++; f.runSignal=options.signal; if(['running','unverified-run','watcher-error'].includes(f.phase)) await f.run.promise; if(f.phase==='unverified-run') return {ok:false,reason:'shutdown unverified',shutdownError:'shutdown unverified'}; if(options.signal.aborted) return {ok:false,reason:'cancelled'}; return f.result; }

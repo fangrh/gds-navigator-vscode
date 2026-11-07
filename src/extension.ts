@@ -5,6 +5,7 @@ import { createMarkerExample, initializeGdsProject } from './starterProject';
 import { GdsSidebarProvider } from './gdsSidebar';
 import * as path from 'path';
 let activeProvider: GdsEditorProvider | undefined;
+let activeEnvironment: EnvProvider | undefined;
 
 async function chooseProjectRoot(): Promise<{ root: string; openAfter: boolean } | undefined> {
     const folders = vscode.workspace.workspaceFolders || [];
@@ -30,9 +31,11 @@ export function activate(context: vscode.ExtensionContext): void {
     const provider = new GdsEditorProvider(context, env, output);
     const sidebar = new GdsSidebarProvider();
     activeProvider = provider;
+    activeEnvironment = env;
 
     context.subscriptions.push(
         provider,
+        env,
         sidebar,
         vscode.window.registerCustomEditorProvider(GdsEditorProvider.viewType, provider, {
             webviewOptions: { retainContextWhenHidden: true },
@@ -92,6 +95,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export async function deactivate(): Promise<void> {
     const provider = activeProvider;
-    await provider?.shutdown();
-    if (activeProvider === provider) activeProvider = undefined;
+    const env = activeEnvironment;
+    try {
+        const results = await Promise.allSettled([env?.shutdown(), provider?.shutdown()]);
+        const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map(result => result.reason);
+        if (failures.length) throw new AggregateError(failures, 'Could not complete GDS shutdown: '
+            + failures.map(error => error instanceof Error ? error.message : String(error)).join('; '));
+    } finally {
+        if (activeProvider === provider) activeProvider = undefined;
+        if (activeEnvironment === env) activeEnvironment = undefined;
+    }
 }
