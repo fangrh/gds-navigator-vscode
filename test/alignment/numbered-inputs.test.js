@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer-core');
 const { parseArgs } = require('./align-markers-direct');
+const { closeOwnedBrowser } = require('../../scripts/process-cleanup.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
 const SCRIPT = path.join(ROOT, 'webview/numbered-marker-alignment.js');
@@ -14,8 +15,12 @@ assert(browserPath, 'Edge/Chrome required; set GDS_BROWSER');
 async function main() {
   assert.equal(parseArgs(['--gds', 'a', '--image', 'b', '--out', 'c', '--marker-appearance', 'dark', '--marker-layers', '1/0,8/0']).markerAppearance, 'dark');
   assert.throws(() => parseArgs(['--gds', 'a', '--image', 'b', '--out', 'c', '--marker-layers', '4/0']), /cannot include 4\/0/);
-  const browser = await puppeteer.launch({ executablePath: browserPath, headless: true });
+  const reportDir = path.resolve(process.env.GDS_NUMBERED_INPUTS_REPORT_DIR || path.join(ROOT, 'logs', 'numbered-markers', 'inputs'));
+  fs.mkdirSync(reportDir, { recursive: true });
+  const profileDir = fs.mkdtempSync(path.join(reportDir, 'profile-'));
+  let browser, shutdown, shutdownError = null, status = 'failed', error = null, sourceIntegrity = null;
   try {
+    browser = await puppeteer.launch({ executablePath: browserPath, headless: true, userDataDir: profileDir });
     const page = await browser.newPage();
     await page.addScriptTag({ path: SCRIPT });
     const cases = await page.evaluate(async () => {
@@ -24,15 +29,21 @@ async function main() {
       const forbidden = await NumberedMarkerAlignment.align({ image: {}, features: [], options: { markerLayers: ['4/0'] } });
       const oversized = await NumberedMarkerAlignment.align({ image: { naturalWidth: 100000, naturalHeight: 100000 }, features: [] });
       let singular = false; try { NumberedMarkerAlignment.inverse([1, 2, 3, 2, 4, 6, 1, 2, 3]); } catch (_) { singular = true; }
-      const canvas = document.createElement('canvas'); canvas.width = 200; canvas.height = 100; const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#888'; ctx.fillRect(0, 0, 200, 100); for (const x of [20, 90, 160]) { ctx.fillStyle = '#eee'; ctx.fillRect(x, 35, 20, 20); }
-      const brightImage = new Image(); brightImage.src = canvas.toDataURL(); await brightImage.decode();
+      // Snapshot each fixture before yielding; a reused context can be lost during decoding.
+      const fixtureImage = color => {
+        const canvas = document.createElement('canvas'); canvas.width = 200; canvas.height = 100; const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.fillStyle = '#888'; ctx.fillRect(0, 0, 200, 100); for (const x of [20, 90, 160]) { ctx.fillStyle = color; ctx.fillRect(x, 35, 20, 20); }
+        const background = Array.from(ctx.getImageData(0, 0, 1, 1).data), square = Array.from(ctx.getImageData(20, 35, 1, 1).data);
+        if (ctx.isContextLost() || String(background) !== '136,136,136,255' || String(square) !== (color === '#eee' ? '238,238,238,255' : '34,34,34,255')) throw new Error('Invalid fixture raster for ' + color + ': ' + JSON.stringify({ contextLost: ctx.isContextLost(), background, square }));
+        const image = new Image(); image.src = canvas.toDataURL(); return { image, source: { contextLost: false, background, square } };
+      };
+      const brightFixture = fixtureImage('#eee'), brightImage = brightFixture.image; await brightImage.decode();
       const brightPads = NumberedMarkerAlignment.photoMarkers(brightImage, { markerAppearance: 'bright' }).pads.length;
-      ctx.fillStyle = '#888'; ctx.fillRect(0, 0, 200, 100); for (const x of [20, 90, 160]) { ctx.fillStyle = '#222'; ctx.fillRect(x, 35, 20, 20); }
-      const darkImage = new Image(); darkImage.src = canvas.toDataURL(); await darkImage.decode();
+      const darkFixture = fixtureImage('#222'), darkImage = darkFixture.image; await darkImage.decode();
       const darkPads = NumberedMarkerAlignment.photoMarkers(darkImage, { markerAppearance: 'dark' }).pads.length;
-      return { bad, malformed, forbidden, oversized, singular, brightPads, darkPads };
+      return { bad, malformed, forbidden, oversized, singular, brightPads, darkPads, source: { bright: brightFixture.source, dark: darkFixture.source } };
     });
+    sourceIntegrity = cases.source;
     assert.equal(cases.bad.status, 'failed');
     assert.match(cases.bad.reason, /invalid dimensions|Image/);
     assert.equal(cases.malformed.reason, 'Non-finite polygon coordinate');
@@ -41,6 +52,12 @@ async function main() {
     assert.equal(cases.singular, true);
     assert.equal(cases.brightPads, 3);
     assert.equal(cases.darkPads, 3);
+    assert.equal(cases.source.bright.contextLost, false);
+    assert.equal(cases.source.dark.contextLost, false);
+    assert.deepEqual(cases.source.bright.background, [136, 136, 136, 255]);
+    assert.deepEqual(cases.source.dark.background, [136, 136, 136, 255]);
+    assert.deepEqual(cases.source.bright.square, [238, 238, 238, 255]);
+    assert.deepEqual(cases.source.dark.square, [34, 34, 34, 255]);
 
     const fixture = JSON.parse(fs.readFileSync(path.join(ROOT, 'test/fixtures/jj_pad_center_50_geo.json'), 'utf8'));
     const centers = [[-200, -200], [0, -200], [-200, -400], [0, -400]];
@@ -55,7 +72,7 @@ async function main() {
     // Render the actual vector marker geometry for each threshold mode and layer selection.
     for (const [mode, color, layers] of [['bright', '#eee', ['1/0', '8/0', '9/0']], ['dark', '#222', ['1/0', '8/0', '9/0']], ['yellow', '#e7ee30', ['1/0', '8/0', '9/0']]]) {
       const result = await page.evaluate(async ({ ss, features, inverseH, mode, color, layers }) => {
-        const c = document.createElement('canvas'); c.width = 720; c.height = 720; const ctx = c.getContext('2d'); ctx.fillStyle = '#aaa'; ctx.fillRect(0, 0, 720, 720);
+        const c = document.createElement('canvas'); c.width = 720; c.height = 720; const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#aaa'; ctx.fillRect(0, 0, 720, 720);
         for (const sample of ss) { ctx.beginPath(); sample.f.geometry.coordinates[0].forEach((p, i) => { const z = inverseH[6]*p[0] + inverseH[7]*p[1] + inverseH[8], x = (inverseH[0]*p[0] + inverseH[1]*p[1] + inverseH[2]) / z, y = (inverseH[3]*p[0] + inverseH[4]*p[1] + inverseH[5]) / z; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.closePath(); ctx.fillStyle = color; ctx.fill(); }
         const image = new Image(); image.src = c.toDataURL(); await image.decode(); return NumberedMarkerAlignment.align({ image, features, options: { markerAppearance: mode, markerLayers: layers } });
       }, { ss: samples, features: fixture.features.filter(f => [1, 8, 9].includes(Number(f.properties.layer))), inverseH: inverse(h), mode, color, layers });
@@ -63,12 +80,25 @@ async function main() {
     }
     const remapped = fixture.features.filter(f => [1, 8, 9].includes(Number(f.properties.layer))).map(f => ({ ...f, properties: { ...f.properties, layer: '12/0' } }));
     const custom = await page.evaluate(async ({ ss, features, inverseH }) => {
-      const c = document.createElement('canvas'); c.width = 720; c.height = 720; const ctx = c.getContext('2d'); ctx.fillStyle = '#aaa'; ctx.fillRect(0, 0, 720, 720);
+      const c = document.createElement('canvas'); c.width = 720; c.height = 720; const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.fillStyle = '#aaa'; ctx.fillRect(0, 0, 720, 720);
       for (const sample of ss) { ctx.beginPath(); sample.f.geometry.coordinates[0].forEach((p, i) => { const z = inverseH[6]*p[0] + inverseH[7]*p[1] + inverseH[8], x = (inverseH[0]*p[0] + inverseH[1]*p[1] + inverseH[2]) / z, y = (inverseH[3]*p[0] + inverseH[4]*p[1] + inverseH[5]) / z; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.closePath(); ctx.fillStyle = '#e7ee30'; ctx.fill(); }
       const image = new Image(); image.src = c.toDataURL(); await image.decode(); return NumberedMarkerAlignment.align({ image, features, options: { markerLayers: ['12/0'] } });
     }, { ss: samples, features: remapped, inverseH: inverse(h) });
     assert.equal(custom.status, 'aligned', custom.reason); assert.deepEqual(custom.markers.map(m => m.label).sort(), ids); assert.equal(custom.selectedOptions.markerLayers[0], '12/0');
-    console.log(JSON.stringify({ status: 'passed', cases: 5 }));
-  } finally { await browser.close(); }
+    status = 'passed';
+  } catch (e) {
+    error = { name: e.name, message: e.message, stack: e.stack };
+    throw e;
+  } finally {
+    try {
+      if (browser) { shutdown = await closeOwnedBrowser(browser, { profileDir }); assert.equal(shutdown.verified, true, 'Owned browser shutdown must be verified'); }
+    } catch (e) { shutdownError = String(e.stack || e); throw e; }
+    finally {
+      const finalStatus = status === 'passed' && shutdown?.verified && !shutdownError ? 'passed' : 'failed';
+      fs.writeFileSync(path.join(reportDir, 'report.json'), JSON.stringify({ status: finalStatus, error, shutdownError, sourceIntegrity, shutdownPID: shutdown?.pid ?? null, shutdownVerified: shutdown?.verified ?? false, survivors: shutdown?.survivors ?? [], reportDir }, null, 2));
+      if (finalStatus === 'passed') fs.rmSync(profileDir, { recursive: true, force: true });
+    }
+  }
+  console.log(JSON.stringify({ status: 'passed', cases: 5 }));
 }
 main().catch(error => { console.error(error.stack); process.exitCode = 1; });
