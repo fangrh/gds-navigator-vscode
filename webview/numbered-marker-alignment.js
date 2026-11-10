@@ -114,6 +114,7 @@
         const decoded=typeof root.OffscreenCanvas!=='undefined'&&image instanceof root.OffscreenCanvas;
         const c=decoded?image:canvas(w,h),ctx=c.getContext('2d');if (!ctx) throw new Error('Canvas 2D context unavailable');if(!decoded)ctx.drawImage(image,0,0);
         const rgba=ctx.getImageData(0,0,w,h).data,mask=new Uint8Array(w*h),labelMask=new Uint8Array(w*h),seen=new Uint8Array(w*h),pads=[];
+        const maxPadWidth=Math.min(w,h)*.2;
         for(let i=0;i<mask.length;i++) {
             // Invisible pixels must not connect dark markers through a transparent background.
             if(rgba[4*i+3]===0)continue;
@@ -121,12 +122,22 @@
         }
         for(let i=0;i<mask.length;i++) {
             if(!mask[i]||seen[i])continue;
-            const stack=[i],pixels=[];seen[i]=1;let x0=w,y0=h,x1=0,y1=0,sx=0,sy=0;
-            while(stack.length) {const q=stack.pop(),x=q%w,y=Math.floor(q/w);pixels.push(q);sx+=x+.5;sy+=y+.5;
-                x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);
-                for(const j of [x>0?q-1:-1,x+1<w?q+1:-1,y>0?q-w:-1,y+1<h?q+w:-1])
-                    if(j>=0&&mask[j]&&!seen[j]){seen[j]=1;stack.push(j);}
+            const stack=[i],pixels=[];seen[i]=1;let x0=w,y0=h,x1=0,y1=0,sx=0,sy=0,rejected=false;
+            while(stack.length) {const q=stack.pop(),x=q%w,y=Math.floor(q/w);
+                if(!rejected) {
+                    x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);
+                    // Border contact and excessive width cannot be repaired by later pixels.
+                    if(x===0||y===0||x===w-1||y===h-1||x1-x0+1>maxPadWidth) {rejected=true;pixels.length=0;}
+                    else {pixels.push(q);sx+=x+.5;sy+=y+.5;}
+                }
+                // Preserve visit order without creating a temporary neighbor array.
+                let j;
+                if(x>0){j=q-1;if(mask[j]&&!seen[j]){seen[j]=1;stack.push(j);}}
+                if(x+1<w){j=q+1;if(mask[j]&&!seen[j]){seen[j]=1;stack.push(j);}}
+                if(y>0){j=q-w;if(mask[j]&&!seen[j]){seen[j]=1;stack.push(j);}}
+                if(y+1<h){j=q+w;if(mask[j]&&!seen[j]){seen[j]=1;stack.push(j);}}
             }
+            if(rejected)continue;
             const bw=x1-x0+1,bh=y1-y0+1;
             if(pixels.length<100||bw/bh<.65||bw/bh>1.5||pixels.length/(bw*bh)<.65||bw>Math.min(w,h)*.2)continue;
             if(x0===0||y0===0||x1===w-1||y1===h-1)continue;
